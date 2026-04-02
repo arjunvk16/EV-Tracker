@@ -35,29 +35,30 @@
   }
 
   // ─── ChargeMOD Tariff (from invoice) ───────────────────────────────────────
-  // Energy: ₹0/kWh (NS tariff), Service: ₹9/kWh + 18% GST
-  function chargemodCost(kwh, tariffType = 'NS') {
-    const energyRate = tariffType === 'S' ? 0 : 0;
-    const serviceRate = tariffType === 'S' ? 9 : 9;
-    const energy = kwh * energyRate;
-    const service = kwh * serviceRate;
-    const gst = service * 0.18;
-    return {
-      energy: parseFloat(energy.toFixed(2)),
-      service: parseFloat(service.toFixed(2)),
-      gst: parseFloat(gst.toFixed(2)),
-      total: parseFloat((energy + service + gst).toFixed(2))
-    };
+  // Energy: ₹0/kWh (NS tariff), Service: ₹9/kWh + 18% GST on service only
+  // Verified: 1.845 kWh → service=16.605 → GST=2.988 → total=19.593 ≈ ₹19.59 ✓
+  function chargemodCost(kwh) {
+    const service = parseFloat((kwh * 9).toFixed(2));
+    const gst     = parseFloat((service * 0.18).toFixed(2));
+    const total   = parseFloat((service + gst).toFixed(2));
+    return { energy: 0, service, gst, total };
   }
 
   // ─── Battery capacity ──────────────────────────────────────────────────────
-  // From invoice: 1.845 kWh for a session — user's car battery capacity
-  // We'll let user set it, default 30 kWh (common EV in India)
   function getCarCapacity() {
-    return parseFloat(localStorage.getItem('ev_battery_capacity') || '30');
+    return parseFloat(localStorage.getItem('ev_battery_capacity') || '3.97');
   }
 
-  function calcKwh(startPct, endPct) {
+  // kWh from % range — OR use manual kWh entry if provided
+  function getKwh() {
+    const method = document.getElementById('inp_method').value;
+    if (method === 'outside') {
+      const v = parseFloat(document.getElementById('inp_kwh_direct').value);
+      return (!isNaN(v) && v > 0) ? parseFloat(v.toFixed(3)) : null;
+    }
+    const startPct = parseFloat(document.getElementById('inp_start').value);
+    const endPct   = parseFloat(document.getElementById('inp_end').value);
+    if (isNaN(startPct) || isNaN(endPct) || endPct <= startPct) return null;
     const cap = getCarCapacity();
     return parseFloat(((endPct - startPct) / 100 * cap).toFixed(3));
   }
@@ -73,29 +74,26 @@
     const dur_h    = parseInt(document.getElementById('inp_dur_h').value || '0');
     const dur_m    = parseInt(document.getElementById('inp_dur_m').value || '0');
 
-    if (!date || isNaN(startPct) || isNaN(endPct) || endPct <= startPct) {
-      showToast('Please fill all fields correctly. End % must be > Start %.', 'error');
+    const kwh = getKwh();
+    if (!date || kwh === null || kwh <= 0) {
+      if (method === 'home') showToast('Enter valid Start % and End % (end must be higher).', 'error');
+      else showToast('Enter the kWh used from your ChargeMOD invoice/app.', 'error');
       return;
     }
 
-    const kwh = calcKwh(startPct, endPct);
-    let cost = {}, costBreakdown = {};
-
+    let cost = {};
     if (method === 'home') {
       const amt = ksebCost(kwh);
       cost = { total: amt, energy: amt, service: 0, gst: 0 };
-      costBreakdown = { type: 'KSEB', rate: 'Slab-based', units: kwh };
     } else {
-      const c = chargemodCost(kwh, tariff);
-      cost = c;
-      costBreakdown = { type: 'ChargeMOD', tariff, units: kwh };
+      cost = chargemodCost(kwh);
     }
 
     const session = {
-      method, date, startPct, endPct, kwh,
+      method, date, startPct: startPct||null, endPct: endPct||null, kwh,
       cost: cost.total, energy: cost.energy,
       service: cost.service, gst: cost.gst,
-      tariff: method === 'home' ? 'KSEB' : tariff,
+      tariff: method === 'home' ? 'KSEB' : 'NS (₹9/kWh)',
       duration: `${dur_h}h ${dur_m}m`,
       note,
       createdAt: new Date().toISOString()
@@ -178,7 +176,7 @@
       <tr class="session-row ${s.method}">
         <td><span class="badge ${s.method}">${s.method === 'home' ? '🏠 Home' : '⚡ Outside'}</span></td>
         <td>${formatDate(s.date)}</td>
-        <td class="mono">${s.startPct}% → ${s.endPct}%</td>
+        <td class="mono">${s.method==='home' ? (s.startPct+'% → '+s.endPct+'%') : '—'}</td>
         <td class="mono">${(s.kwh||0).toFixed(3)} kWh</td>
         <td class="mono">${s.tariff || '—'}</td>
         <td class="mono">${s.duration || '—'}</td>
@@ -310,17 +308,24 @@
   }
   function showBtn(label) { const b = document.getElementById('save_btn'); if(b) b.textContent = label; }
   function clearForm() {
-    ['inp_start','inp_end','inp_note','inp_dur_h','inp_dur_m'].forEach(id => {
+    ['inp_start','inp_end','inp_note','inp_dur_h','inp_dur_m','inp_kwh_direct'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
     });
+    document.getElementById('cost_preview').textContent = '';
   }
 
   // ─── Method toggle ─────────────────────────────────────────────────────────
   window.toggleMethod = function() {
     const method = document.getElementById('inp_method').value;
-    document.getElementById('tariff_row').style.display = method === 'outside' ? 'flex' : 'none';
-    document.getElementById('kseb_note').style.display  = method === 'home' ? 'block' : 'none';
+    // Notes
+    document.getElementById('kseb_note').style.display  = method === 'home'    ? 'block' : 'none';
+    document.getElementById('out_note').style.display   = method === 'outside' ? 'block' : 'none';
+    // Home: show % inputs, hide direct kWh
+    document.getElementById('row_pct').style.display    = method === 'home'    ? 'flex'  : 'none';
+    // Outside: show direct kWh, hide % inputs
+    document.getElementById('row_kwh').style.display    = method === 'outside' ? 'flex'  : 'none';
+    previewCost();
   };
 
   // ─── Settings ──────────────────────────────────────────────────────────────
@@ -341,28 +346,23 @@
   // ─── Preview cost live ─────────────────────────────────────────────────────
   window.previewCost = function() {
     const method  = document.getElementById('inp_method').value;
-    const startPc = parseFloat(document.getElementById('inp_start').value);
-    const endPc   = parseFloat(document.getElementById('inp_end').value);
-    const tariff  = document.getElementById('inp_tariff').value;
     const previewEl = document.getElementById('cost_preview');
-    if (isNaN(startPc) || isNaN(endPc) || endPc <= startPc) {
-      previewEl.textContent = '';
-      return;
-    }
-    const kwh = calcKwh(startPc, endPc);
+    const kwh = getKwh();
+    if (!kwh || kwh <= 0) { previewEl.textContent = ''; return; }
+
     let txt = '';
     if (method === 'home') {
-      txt = `~${kwh.toFixed(3)} kWh → ₹${ksebCost(kwh).toFixed(2)} (KSEB)`;
+      txt = `${kwh.toFixed(3)} kWh → ₹${ksebCost(kwh).toFixed(2)} (KSEB slab rate)`;
     } else {
-      const c = chargemodCost(kwh, tariff);
-      txt = `~${kwh.toFixed(3)} kWh → ₹${c.total.toFixed(2)} (incl. GST ₹${c.gst.toFixed(2)})`;
+      const c = chargemodCost(kwh);
+      txt = `${kwh.toFixed(3)} kWh → Service ₹${c.service.toFixed(2)} + GST ₹${c.gst.toFixed(2)} = ₹${c.total.toFixed(2)}`;
     }
-    previewEl.textContent = txt;
+    previewEl.textContent = '≈ ' + txt;
   };
 
   // ─── Boot ──────────────────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', async () => {
-    const cap = localStorage.getItem('ev_battery_capacity') || '30';
+    const cap = localStorage.getItem('ev_battery_capacity') || '3.97';
     const capEl = document.getElementById('battery_cap');
     if (capEl) capEl.value = cap;
     document.getElementById('inp_date').value = new Date().toISOString().split('T')[0];
@@ -906,15 +906,9 @@
     <div class="kseb-note" id="kseb_note">
       KSEB domestic slab tariff — 0–50 units: ₹3.25 | 51–100: ₹4.00 | 101–200: ₹5.25 | 200+: ₹6.85 per unit
     </div>
-
-    <div class="form-row" id="tariff_row" style="display:none">
-      <div class="form-group">
-        <label>ChargeMOD Tariff</label>
-        <select id="inp_tariff" onchange="previewCost()">
-          <option value="NS">NS — Non-Solar (₹9/kWh + 18% GST)</option>
-          <option value="S">S — Solar (₹9/kWh + 18% GST)</option>
-        </select>
-      </div>
+    <div class="kseb-note" id="out_note" style="display:none;background:rgba(249,115,22,0.07);border-color:rgba(249,115,22,0.2);color:#fdba74;">
+      ChargeMOD: ₹9.00/kWh service + 18% GST = <strong>₹10.62/kWh effective</strong><br>
+      Verified from invoice: 1.845 kWh → ₹16.60 service + ₹2.99 GST = ₹19.59 ✓
     </div>
 
     <div class="form-row">
@@ -922,6 +916,10 @@
         <label>Date</label>
         <input type="date" id="inp_date">
       </div>
+    </div>
+
+    <!-- HOME: % inputs -->
+    <div class="form-row" id="row_pct">
       <div class="form-group">
         <label>Start Battery %</label>
         <input type="number" id="inp_start" min="0" max="100" placeholder="e.g. 20" oninput="previewCost()">
@@ -929,6 +927,14 @@
       <div class="form-group">
         <label>End Battery %</label>
         <input type="number" id="inp_end" min="0" max="100" placeholder="e.g. 80" oninput="previewCost()">
+      </div>
+    </div>
+
+    <!-- OUTSIDE: direct kWh input from ChargeMOD app/invoice -->
+    <div class="form-row" id="row_kwh" style="display:none">
+      <div class="form-group">
+        <label>kWh Used (from ChargeMOD app or invoice)</label>
+        <input type="number" id="inp_kwh_direct" step="0.001" min="0" placeholder="e.g. 1.845" oninput="previewCost()" style="font-size:1.1rem;padding:12px 14px;">
       </div>
     </div>
 
@@ -991,13 +997,14 @@
     <div class="settings-row">
       <div class="form-group">
         <label>Battery Capacity (kWh)</label>
-        <input type="number" id="battery_cap" step="0.1" min="1" placeholder="30">
+        <input type="number" id="battery_cap" step="0.01" min="1" placeholder="e.g. 3.97">
       </div>
       <button class="settings-save-btn" onclick="saveBattery()">Save</button>
     </div>
     <div style="margin-top:12px;font-size:0.7rem;color:var(--muted);line-height:1.6">
-      Your EV's usable battery capacity. Used to calculate kWh from % charged.<br>
-      From your ChargeMOD invoice: 1.845 kWh was used in a session — adjust based on your car.
+      Your EV's usable battery capacity in kWh. Used to convert % charged → kWh.<br>
+      💡 <strong style="color:var(--accent)">Tip:</strong> For outside sessions, use the <strong>manual kWh field</strong> from your ChargeMOD invoice — it's more accurate than % calculation.<br>
+      From your invoice: 1.845 kWh used in 3H 7M session. Set capacity to match your vehicle.
     </div>
   </div>
 
