@@ -25,12 +25,20 @@
   const db = getFirestore(app);
  
   // ─── KSEB Tariff Slabs (Kerala Domestic) ───────────────────────────────────
+  // Updated to recent KSEB Telescopic Rates
   function ksebCost(units) {
     let cost = 0;
-    if (units <= 50)        cost = units * 3.25;
-    else if (units <= 100)  cost = 50 * 3.25 + (units - 50) * 4.00;
-    else if (units <= 200)  cost = 50 * 3.25 + 50 * 4.00 + (units - 100) * 5.25;
-    else                    cost = 50 * 3.25 + 50 * 4.00 + 100 * 5.25 + (units - 200) * 6.85;
+    if (units <= 50) {
+      cost = units * 3.25;
+    } else if (units <= 100) {
+      cost = 50 * 3.25 + (units - 50) * 4.05;
+    } else if (units <= 150) {
+      cost = 50 * 3.25 + 50 * 4.05 + (units - 100) * 5.10;
+    } else if (units <= 200) {
+      cost = 50 * 3.25 + 50 * 4.05 + 50 * 5.10 + (units - 150) * 6.95;
+    } else {
+      cost = 50 * 3.25 + 50 * 4.05 + 50 * 5.10 + 50 * 6.95 + (units - 200) * 8.20;
+    }
     return parseFloat(cost.toFixed(2));
   }
  
@@ -45,6 +53,47 @@
   // ─── Battery capacity ──────────────────────────────────────────────────────
   function getCarCapacity() {
     return parseFloat(localStorage.getItem('ev_battery_capacity') || '3.97');
+  }
+ 
+  // ─── Calibration ───────────────────────────────────────────────────────────
+  function getCalibration() {
+    return {
+      start: parseFloat(localStorage.getItem('ev_calib_start') || '47'),
+      end: parseFloat(localStorage.getItem('ev_calib_end') || '100'),
+      h: parseFloat(localStorage.getItem('ev_calib_h') || '3'),
+      m: parseFloat(localStorage.getItem('ev_calib_m') || '7')
+    };
+  }
+ 
+  window.saveCalibration = function() {
+    const s = parseFloat(document.getElementById('calib_start').value);
+    const e = parseFloat(document.getElementById('calib_end').value);
+    const h = parseFloat(document.getElementById('calib_h').value);
+    const m = parseFloat(document.getElementById('calib_m').value);
+    
+    if (isNaN(s) || isNaN(e) || isNaN(h) || isNaN(m) || e <= s) {
+      showToast('Invalid calibration values', 'error');
+      return;
+    }
+    
+    localStorage.setItem('ev_calib_start', s);
+    localStorage.setItem('ev_calib_end', e);
+    localStorage.setItem('ev_calib_h', h);
+    localStorage.setItem('ev_calib_m', m);
+    showToast('Calibration saved! ⏱️', 'success');
+    previewCost();
+  };
+ 
+  function calculateHomeDuration(startPct, endPct) {
+    const cal = getCalibration();
+    const refDiff = cal.end - cal.start;
+    if (refDiff <= 0) return 0;
+    const refMins = (cal.h * 60) + cal.m;
+    const minsPerPct = refMins / refDiff;
+    
+    const currentDiff = endPct - startPct;
+    if (currentDiff <= 0) return 0;
+    return Math.round(currentDiff * minsPerPct);
   }
  
   // kWh from % range — OR use manual kWh entry if provided
@@ -92,6 +141,13 @@
       service: cost.service, gst: cost.gst,
       tariff: method === 'home' ? 'KSEB' : 'NS (₹9/kWh)',
       duration: (() => {
+        if (method === 'home') {
+          if (!startPct || !endPct) return '—';
+          const totalMins = calculateHomeDuration(startPct, endPct);
+          const h = Math.floor(totalMins / 60);
+          const m = totalMins % 60;
+          return `${h}h ${m}m`;
+        }
         if (!timeStart || !timeEnd) return '—';
         const [sh,sm] = timeStart.split(':').map(Number);
         const [eh,em] = timeEnd.split(':').map(Number);
@@ -99,7 +155,8 @@
         if (diff < 0) diff += 24*60;
         return `${Math.floor(diff/60)}h ${diff%60}m`;
       })(),
-      timeStart, timeEnd,
+      timeStart: method === 'home' ? '' : timeStart,
+      timeEnd: method === 'home' ? '' : timeEnd,
       note,
       createdAt: new Date().toISOString()
     };
@@ -330,6 +387,10 @@
     document.getElementById('row_pct').style.display    = method === 'home'    ? 'flex'  : 'none';
     // Outside: show direct kWh, hide % inputs
     document.getElementById('row_kwh').style.display    = method === 'outside' ? 'flex'  : 'none';
+    // Time inputs: Hide for Home (auto-calculated)
+    const rowTimes = document.getElementById('row_times');
+    if (rowTimes) rowTimes.style.display = method === 'home' ? 'none' : 'flex';
+    
     previewCost();
   };
  
@@ -357,7 +418,16 @@
  
     let txt = '';
     if (method === 'home') {
-      txt = `${kwh.toFixed(3)} kWh → ₹${ksebCost(kwh).toFixed(2)} (KSEB slab rate)`;
+      let timeStr = "";
+      const startPct = parseFloat(document.getElementById('inp_start').value);
+      const endPct = parseFloat(document.getElementById('inp_end').value);
+      if (!isNaN(startPct) && !isNaN(endPct) && endPct > startPct) {
+        const totalMins = calculateHomeDuration(startPct, endPct);
+        const h = Math.floor(totalMins / 60);
+        const m = totalMins % 60;
+        timeStr = ` • ⏱️ Auto Time: ${h}h ${m}m`;
+      }
+      txt = `${kwh.toFixed(3)} kWh → ₹${ksebCost(kwh).toFixed(2)} (KSEB slab rate)${timeStr}`;
     } else {
       const c = chargemodCost(kwh);
       txt = `${kwh.toFixed(3)} kWh → Service ₹${c.service.toFixed(2)} + GST ₹${c.gst.toFixed(2)} = ₹${c.total.toFixed(2)}`;
@@ -370,6 +440,13 @@
     const cap = localStorage.getItem('ev_battery_capacity') || '3.97';
     const capEl = document.getElementById('battery_cap');
     if (capEl) capEl.value = cap;
+    
+    const cal = getCalibration();
+    const elS = document.getElementById('calib_start'); if (elS) elS.value = cal.start;
+    const elE = document.getElementById('calib_end');   if (elE) elE.value = cal.end;
+    const elH = document.getElementById('calib_h');     if (elH) elH.value = cal.h;
+    const elM = document.getElementById('calib_m');     if (elM) elM.value = cal.m;
+ 
     document.getElementById('inp_date').value = new Date().toISOString().split('T')[0];
     toggleMethod();
     await loadAll();
@@ -909,7 +986,7 @@
     <input type="hidden" id="inp_method" value="home">
  
     <div class="kseb-note" id="kseb_note">
-      KSEB domestic slab tariff — 0–50 units: ₹3.25 | 51–100: ₹4.00 | 101–200: ₹5.25 | 200+: ₹6.85 per unit
+      KSEB domestic slab tariff — 0–50: ₹3.25 | 51–100: ₹4.05 | 101–150: ₹5.10 | 151–200: ₹6.95 | 200+: ₹8.20
     </div>
     <div class="kseb-note" id="out_note" style="display:none;background:rgba(249,115,22,0.07);border-color:rgba(249,115,22,0.2);color:#fdba74;">
       ChargeMOD: ₹9.00/kWh service + 18% GST = <strong>₹10.62/kWh effective</strong><br>
@@ -943,7 +1020,7 @@
       </div>
     </div>
  
-    <div class="form-row">
+    <div class="form-row" id="row_times">
       <div class="form-group">
         <label>Start Time</label>
         <input type="time" id="inp_time_start">
@@ -952,6 +1029,9 @@
         <label>End Time</label>
         <input type="time" id="inp_time_end">
       </div>
+    </div>
+    
+    <div class="form-row">
       <div class="form-group">
         <label>Note (optional)</label>
         <input type="text" id="inp_note" placeholder="e.g. Vismaya EVCS">
@@ -998,6 +1078,33 @@
 <!-- ═══════════ SETTINGS ═══════════ -->
 <div id="tab_settings" class="tab-pane">
   <div class="settings-card">
+    <div class="settings-title">⏱️ Home Charging Speed Calibration</div>
+    <div style="font-size:0.7rem; color:var(--muted); margin-bottom:16px; line-height:1.6;">
+      Set a reference to auto-calculate charging time based on percentage added.<br>
+      E.g. If 47% to 100% takes 3h 7m, set it here.
+    </div>
+    <div class="settings-row" style="gap:10px;">
+      <div class="form-group" style="max-width:70px;">
+        <label>Start %</label>
+        <input type="number" id="calib_start" value="47">
+      </div>
+      <div class="form-group" style="max-width:70px;">
+        <label>End %</label>
+        <input type="number" id="calib_end" value="100">
+      </div>
+      <div class="form-group" style="max-width:70px;">
+        <label>Hours</label>
+        <input type="number" id="calib_h" value="3">
+      </div>
+      <div class="form-group" style="max-width:70px;">
+        <label>Mins</label>
+        <input type="number" id="calib_m" value="7">
+      </div>
+      <button class="settings-save-btn" onclick="saveCalibration()" style="margin-left:auto;">Save</button>
+    </div>
+  </div>
+ 
+  <div class="settings-card">
     <div class="settings-title">🔋 Battery Configuration</div>
     <div class="settings-row">
       <div class="form-group">
@@ -1019,9 +1126,10 @@
       <thead><tr><th>Units (kWh)</th><th>Rate</th></tr></thead>
       <tbody>
         <tr><td>0 – 50</td><td>₹3.25 / unit</td></tr>
-        <tr><td>51 – 100</td><td>₹4.00 / unit</td></tr>
-        <tr><td>101 – 200</td><td>₹5.25 / unit</td></tr>
-        <tr><td>200+</td><td>₹6.85 / unit</td></tr>
+        <tr><td>51 – 100</td><td>₹4.05 / unit</td></tr>
+        <tr><td>101 – 150</td><td>₹5.10 / unit</td></tr>
+        <tr><td>151 – 200</td><td>₹6.95 / unit</td></tr>
+        <tr><td>200+</td><td>₹8.20 / unit</td></tr>
       </tbody>
     </table>
   </div>
