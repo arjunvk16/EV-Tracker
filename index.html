@@ -71,8 +71,8 @@
     const endPct   = parseFloat(document.getElementById('inp_end').value);
     const tariff   = document.getElementById('inp_tariff').value;
     const note     = document.getElementById('inp_note').value.trim();
-    const dur_h    = parseInt(document.getElementById('inp_dur_h').value || '0');
-    const dur_m    = parseInt(document.getElementById('inp_dur_m').value || '0');
+    const timeStart = document.getElementById('inp_time_start').value;
+    const timeEnd   = document.getElementById('inp_time_end').value;
 
     const kwh = getKwh();
     if (!date || kwh === null || kwh <= 0) {
@@ -94,7 +94,15 @@
       cost: cost.total, energy: cost.energy,
       service: cost.service, gst: cost.gst,
       tariff: method === 'home' ? 'KSEB' : 'NS (₹9/kWh)',
-      duration: `${dur_h}h ${dur_m}m`,
+      duration: (() => {
+        if (!timeStart || !timeEnd) return '—';
+        const [sh,sm] = timeStart.split(':').map(Number);
+        const [eh,em] = timeEnd.split(':').map(Number);
+        let diff = (eh*60+em) - (sh*60+sm);
+        if (diff < 0) diff += 24*60;
+        return `${Math.floor(diff/60)}h ${diff%60}m`;
+      })(),
+      timeStart, timeEnd,
       note,
       createdAt: new Date().toISOString()
     };
@@ -179,7 +187,7 @@
         <td class="mono">${s.method==='home' ? (s.startPct+'% → '+s.endPct+'%') : '—'}</td>
         <td class="mono">${(s.kwh||0).toFixed(3)} kWh</td>
         <td class="mono">${s.tariff || '—'}</td>
-        <td class="mono">${s.duration || '—'}</td>
+        <td class="mono">${s.timeStart && s.timeEnd ? s.timeStart+' – '+s.timeEnd : (s.duration||'—')}</td>
         <td class="mono cost">₹${(s.cost||0).toFixed(2)}</td>
         <td><button class="del-btn" onclick="deleteSession('${s.id}')">✕</button></td>
       </tr>
@@ -308,7 +316,7 @@
   }
   function showBtn(label) { const b = document.getElementById('save_btn'); if(b) b.textContent = label; }
   function clearForm() {
-    ['inp_start','inp_end','inp_note','inp_dur_h','inp_dur_m','inp_kwh_direct'].forEach(id => {
+    ['inp_start','inp_end','inp_note','inp_time_start','inp_time_end','inp_kwh_direct'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
     });
@@ -940,12 +948,12 @@
 
     <div class="form-row">
       <div class="form-group">
-        <label>Duration — Hours</label>
-        <input type="number" id="inp_dur_h" min="0" max="24" placeholder="3">
+        <label>Start Time</label>
+        <input type="time" id="inp_time_start">
       </div>
       <div class="form-group">
-        <label>Duration — Minutes</label>
-        <input type="number" id="inp_dur_m" min="0" max="59" placeholder="7">
+        <label>End Time</label>
+        <input type="time" id="inp_time_end">
       </div>
       <div class="form-group">
         <label>Note (optional)</label>
@@ -971,7 +979,7 @@
           <th>Battery</th>
           <th>kWh</th>
           <th>Tariff</th>
-          <th>Duration</th>
+          <th>Time</th>
           <th>Cost</th>
           <th></th>
         </tr>
