@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>EV Charge Tracker — Arjun V K</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
  
@@ -25,7 +25,6 @@
   const db = getFirestore(app);
  
   // ─── KSEB Tariff Slabs (Kerala Domestic) ───────────────────────────────────
-  // Updated to recent KSEB Telescopic Rates
   function ksebCost(units) {
     let cost = 0;
     if (units <= 50) {
@@ -122,8 +121,8 @@
  
     const kwh = getKwh();
     if (!date || kwh === null || kwh <= 0) {
-      if (method === 'home') showToast('Enter valid Start % and End % (end must be higher).', 'error');
-      else showToast('Enter the kWh used from your ChargeMOD invoice/app.', 'error');
+      if (method === 'home') showToast('Enter valid Start % and End %.', 'error');
+      else showToast('Enter the kWh used.', 'error');
       return;
     }
  
@@ -162,11 +161,12 @@
     };
  
     try {
-      showBtn('saving...');
+      showBtn('Saving...');
       await addDoc(collection(db, 'ev_sessions'), session);
       showToast('Session saved! ⚡', 'success');
       clearForm();
       await loadAll();
+      switchTab('dashboard'); // Auto redirect to dashboard
     } catch(e) {
       showToast('Save failed: ' + e.message, 'error');
     } finally {
@@ -234,40 +234,66 @@
       tbody.innerHTML = `<tr><td colspan="8" class="empty-row">No sessions yet. Add your first charge!</td></tr>`;
       return;
     }
+    // Added data-labels to each td to support mobile responsive card layout
     tbody.innerHTML = sessions.map(s => `
       <tr class="session-row ${s.method}">
-        <td><span class="badge ${s.method}">${s.method === 'home' ? '🏠 Home' : '⚡ Outside'}</span></td>
-        <td>${formatDate(s.date)}</td>
-        <td class="mono">${s.method==='home' ? (s.startPct+'% → '+s.endPct+'%') : '—'}</td>
-        <td class="mono">${(s.kwh||0).toFixed(3)} kWh</td>
-        <td class="mono">${s.tariff || '—'}</td>
-        <td class="mono">${s.timeStart && s.timeEnd ? s.timeStart+' – '+s.timeEnd : (s.duration||'—')}</td>
-        <td class="mono cost">₹${(s.cost||0).toFixed(2)}</td>
-        <td><button class="del-btn" onclick="deleteSession('${s.id}')">✕</button></td>
+        <td data-label="Method"><span class="badge ${s.method}">${s.method === 'home' ? '🏠 Home' : '⚡ Outside'}</span></td>
+        <td data-label="Date">${formatDate(s.date)}</td>
+        <td data-label="Battery" class="mono">${s.method==='home' ? (s.startPct+'% → '+s.endPct+'%') : '—'}</td>
+        <td data-label="Energy" class="mono">${(s.kwh||0).toFixed(3)} kWh</td>
+        <td data-label="Tariff" class="mono">${s.tariff || '—'}</td>
+        <td data-label="Time" class="mono">${s.timeStart && s.timeEnd ? s.timeStart+' – '+s.timeEnd : (s.duration||'—')}</td>
+        <td data-label="Cost" class="mono cost">₹${(s.cost||0).toFixed(2)}</td>
+        <td data-label="Action"><button class="del-btn" onclick="deleteSession('${s.id}')">✕ Delete</button></td>
       </tr>
     `).join('');
   }
  
-  function renderReports(sessions) {
+  window.renderReports = function(sessions) {
+    if (!sessions) sessions = window._sessions || [];
     const now = new Date();
+    
+    const elWeek = document.getElementById('filter_week');
+    const elMonth = document.getElementById('filter_month');
+    const elYear = document.getElementById('filter_year');
+
+    if (!elWeek || !elMonth || !elYear) return;
+
+    if (!elWeek.value) {
+      const y = now.getFullYear(), m = String(now.getMonth() + 1).padStart(2, '0'), d = String(now.getDate()).padStart(2, '0');
+      elWeek.value = `${y}-${m}-${d}`;
+    }
+    if (!elMonth.value) elMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    if (!elYear.value) elYear.value = now.getFullYear();
  
     // ── Weekly ──────────────────────────────────────────
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - now.getDay());
-    const weekly = sessions.filter(s => new Date(s.date) >= weekStart);
-    buildReport('report_weekly', weekly, 'This Week');
+    const parts = elWeek.value.split('-');
+    const selectedWeekDate = new Date(parts[0], parts[1] - 1, parts[2]);
+    const weekStart = new Date(selectedWeekDate);
+    weekStart.setDate(selectedWeekDate.getDate() - selectedWeekDate.getDay());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    
+    const sy = weekStart.getFullYear(), sm = String(weekStart.getMonth()+1).padStart(2,'0'), sd = String(weekStart.getDate()).padStart(2,'0');
+    const ey = weekEnd.getFullYear(), em = String(weekEnd.getMonth()+1).padStart(2,'0'), ed = String(weekEnd.getDate()).padStart(2,'0');
+
+    const weekStartStr = `${sy}-${sm}-${sd}`;
+    const weekEndStr = `${ey}-${em}-${ed}`;
+
+    const weekly = sessions.filter(s => s.date >= weekStartStr && s.date <= weekEndStr);
+    buildReport('report_weekly', weekly, `Week: ${formatDate(weekStartStr)} – ${formatDate(weekEndStr)}`);
  
     // ── Monthly ─────────────────────────────────────────
-    const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-    const monthly = sessions.filter(s => s.date.startsWith(thisMonth));
-    buildReport('report_monthly', monthly, now.toLocaleString('default',{month:'long',year:'numeric'}));
+    const monthly = sessions.filter(s => s.date.startsWith(elMonth.value));
+    const monthParts = elMonth.value.split('-');
+    const monthDate = new Date(monthParts[0], monthParts[1]-1, 1);
+    const monthLabel = monthDate.toLocaleString('default',{month:'long',year:'numeric'});
+    buildReport('report_monthly', monthly, `Month: ${monthLabel}`);
  
     // ── Yearly ──────────────────────────────────────────
-    const thisYear = now.getFullYear().toString();
-    const yearly = sessions.filter(s => s.date.startsWith(thisYear));
-    buildReport('report_yearly', yearly, thisYear);
+    const yearly = sessions.filter(s => s.date.startsWith(elYear.value.toString()));
+    buildReport('report_yearly', yearly, `Year: ${elYear.value}`);
  
-    // ── Monthly breakdown chart ──────────────────────────
     buildMonthlyChart(sessions);
   }
  
@@ -304,60 +330,118 @@
   }
  
   function buildMonthlyChart(sessions) {
+    const canvasWrap = document.querySelector('.chart-wrap');
     const canvas = document.getElementById('monthly_chart');
-    if (!canvas) return;
+    if (!canvas || !canvasWrap) return;
+    
+    // Support Retina Displays for crisp rendering on smartphones
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvasWrap.getBoundingClientRect();
+    const W = rect.width - 48; // Account for wrapper padding
+    const H = 240; 
+    
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = `${W}px`;
+    canvas.style.height = `${H}px`;
+    
     const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    
     const monthMap = {};
     sessions.forEach(s => {
       const m = s.date.substring(0,7);
       if (!monthMap[m]) monthMap[m] = { home: 0, outside: 0 };
       monthMap[m][s.method] = (monthMap[m][s.method] || 0) + (s.cost || 0);
     });
+    
     const months = Object.keys(monthMap).sort().slice(-12);
     const homeData = months.map(m => monthMap[m].home || 0);
     const outData  = months.map(m => monthMap[m].outside || 0);
  
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, W, H);
     if (!months.length) {
       ctx.fillStyle = '#aaa';
       ctx.font = '14px DM Mono';
-      ctx.fillText('No data yet', canvas.width/2 - 40, canvas.height/2);
+      ctx.textAlign = 'center';
+      ctx.fillText('No data yet', W/2, H/2);
       return;
     }
  
-    const W = canvas.width, H = canvas.height;
-    const pad = { l:50, r:20, t:20, b:50 };
+    const pad = { l: 45, r: 10, t: 30, b: 30 }; // Extra top padding for value labels
     const chartW = W - pad.l - pad.r;
     const chartH = H - pad.t - pad.b;
     const maxVal = Math.max(...months.map(m => (monthMap[m].home||0)+(monthMap[m].outside||0)), 1);
     const barW = chartW / months.length;
+    
+    // Draw horizontal grid lines for clarity
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    [0, 0.25, 0.5, 0.75, 1].forEach(t => {
+      const y = pad.t + chartH * (1 - t);
+      ctx.moveTo(pad.l, y);
+      ctx.lineTo(W - pad.r, y);
+    });
+    ctx.stroke();
  
-    // draw bars
+    // Draw bars & Labels
     months.forEach((m, i) => {
-      const x = pad.l + i * barW + barW * 0.1;
-      const bw = barW * 0.8;
-      const hh = (homeData[i] / maxVal) * chartH;
-      const oh = (outData[i] / maxVal) * chartH;
-      // outside (bottom)
-      ctx.fillStyle = '#f97316';
-      ctx.fillRect(x, pad.t + chartH - oh, bw, oh);
-      // home (on top)
-      ctx.fillStyle = '#22c55e';
-      ctx.fillRect(x, pad.t + chartH - oh - hh, bw, hh);
-      // label
+      const x = pad.l + i * barW + (barW * 0.15);
+      const bw = barW * 0.7; // Thinner bars for better spacing
+      const hVal = homeData[i];
+      const oVal = outData[i];
+      const totalVal = hVal + oVal;
+      
+      const hh = (hVal / maxVal) * chartH;
+      const oh = (oVal / maxVal) * chartH;
+      
+      // Outside (bottom chunk)
+      if (oh > 0) {
+        ctx.fillStyle = '#f97316';
+        ctx.fillRect(x, pad.t + chartH - oh, bw, oh);
+      }
+      // Home (top chunk)
+      if (hh > 0) {
+        ctx.fillStyle = '#22c55e';
+        // Give the top part rounded corners if possible
+        ctx.beginPath();
+        ctx.roundRect(x, pad.t + chartH - oh - hh, bw, hh, [4, 4, 0, 0]);
+        ctx.fill();
+      }
+      
+      // Values strictly above the bar (Enhancing clarity!)
+      if (totalVal > 0) {
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = '600 10px DM Mono';
+        ctx.textAlign = 'center';
+        ctx.fillText('₹' + Math.round(totalVal), x + bw/2, pad.t + chartH - oh - hh - 6);
+      }
+      
+      // X-axis Month Label
       ctx.fillStyle = '#94a3b8';
       ctx.font = '10px DM Mono';
-      ctx.fillText(m.substring(5), x + bw/2 - 10, H - pad.b + 16);
+      ctx.textAlign = 'center';
+      const shortMonth = new Date(m + '-01').toLocaleString('en', {month: 'short'});
+      ctx.fillText(shortMonth, x + bw/2, H - pad.b + 18);
     });
  
     // Y axis labels
     ctx.fillStyle = '#64748b';
     ctx.font = '10px DM Mono';
+    ctx.textAlign = 'left';
     [0, 0.25, 0.5, 0.75, 1].forEach(t => {
       const y = pad.t + chartH * (1 - t);
       ctx.fillText('₹' + Math.round(maxVal * t), 0, y + 4);
     });
   }
+ 
+  // Redraw chart on resize to prevent squishing
+  window.addEventListener('resize', () => {
+    if (document.getElementById('tab_dashboard').classList.contains('active') && window._sessions) {
+      buildMonthlyChart(window._sessions);
+    }
+  });
  
   // ─── Helpers ───────────────────────────────────────────────────────────────
   function setEl(id, val) { const e = document.getElementById(id); if(e) e.textContent = val; }
@@ -380,17 +464,12 @@
   // ─── Method toggle ─────────────────────────────────────────────────────────
   window.toggleMethod = function() {
     const method = document.getElementById('inp_method').value;
-    // Notes
     document.getElementById('kseb_note').style.display  = method === 'home'    ? 'block' : 'none';
     document.getElementById('out_note').style.display   = method === 'outside' ? 'block' : 'none';
-    // Home: show % inputs, hide direct kWh
     document.getElementById('row_pct').style.display    = method === 'home'    ? 'flex'  : 'none';
-    // Outside: show direct kWh, hide % inputs
     document.getElementById('row_kwh').style.display    = method === 'outside' ? 'flex'  : 'none';
-    // Time inputs: Hide for Home (auto-calculated)
     const rowTimes = document.getElementById('row_times');
     if (rowTimes) rowTimes.style.display = method === 'home' ? 'none' : 'flex';
-    
     previewCost();
   };
  
@@ -407,6 +486,11 @@
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
     document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
     document.getElementById('tab_' + tab).classList.add('active');
+    
+    // Re-render chart if switching to dashboard to fix canvas scaling issues
+    if (tab === 'dashboard' && window._sessions) {
+      setTimeout(() => buildMonthlyChart(window._sessions), 50);
+    }
   };
  
   // ─── Preview cost live ─────────────────────────────────────────────────────
@@ -427,10 +511,10 @@
         const m = totalMins % 60;
         timeStr = ` • ⏱️ Auto Time: ${h}h ${m}m`;
       }
-      txt = `${kwh.toFixed(3)} kWh → ₹${ksebCost(kwh).toFixed(2)} (KSEB slab rate)${timeStr}`;
+      txt = `${kwh.toFixed(3)} kWh → ₹${ksebCost(kwh).toFixed(2)} (KSEB)${timeStr}`;
     } else {
       const c = chargemodCost(kwh);
-      txt = `${kwh.toFixed(3)} kWh → Service ₹${c.service.toFixed(2)} + GST ₹${c.gst.toFixed(2)} = ₹${c.total.toFixed(2)}`;
+      txt = `${kwh.toFixed(3)} kWh → Ser. ₹${c.service.toFixed(2)} + GST ₹${c.gst.toFixed(2)} = ₹${c.total.toFixed(2)}`;
     }
     previewEl.textContent = '≈ ' + txt;
   };
@@ -478,29 +562,36 @@
     min-height: 100vh;
     background-image: radial-gradient(ellipse at 20% 10%, rgba(0,229,255,0.04) 0%, transparent 60%),
                       radial-gradient(ellipse at 80% 80%, rgba(249,115,22,0.04) 0%, transparent 60%);
+    /* Padding to accommodate bottom nav on mobile */
+    padding-bottom: 0; 
   }
  
   /* ─── Header ─────────────────────────────────── */
   .header {
-    padding: 32px 24px 20px;
+    padding: 24px 24px 16px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 12px;
+    position: sticky;
+    top: 0;
+    background: rgba(10, 15, 30, 0.9);
+    backdrop-filter: blur(12px);
+    z-index: 50;
   }
-  .header-left { display: flex; align-items: baseline; gap: 16px; }
+  .header-left { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   .logo {
     font-family: 'Syne', sans-serif;
-    font-size: 1.7rem;
+    font-size: 1.5rem;
     font-weight: 800;
     letter-spacing: -1px;
     color: var(--accent);
   }
   .logo span { color: var(--accent2); }
   .header-sub {
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     color: var(--muted);
     letter-spacing: 2px;
     text-transform: uppercase;
@@ -509,20 +600,23 @@
     background: var(--bg3);
     border: 1px solid var(--border);
     border-radius: 100px;
-    padding: 6px 16px;
-    font-size: 0.75rem;
+    padding: 6px 14px;
+    font-size: 0.7rem;
     color: var(--muted);
   }
   .user-pill strong { color: var(--accent); }
  
-  /* ─── Tabs ──────────────────────────────────── */
+  /* ─── Tabs / Bottom Nav ─────────────────────── */
   .tabs {
     display: flex;
     gap: 4px;
     padding: 16px 24px 0;
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
+    scrollbar-width: none; /* Firefox */
   }
+  .tabs::-webkit-scrollbar { display: none; } /* Chrome */
+  
   .tab-btn {
     background: transparent;
     border: none;
@@ -532,62 +626,69 @@
     font-weight: 600;
     letter-spacing: 1px;
     text-transform: uppercase;
-    padding: 10px 20px;
+    padding: 12px 20px;
     cursor: pointer;
     border-bottom: 2px solid transparent;
     transition: all 0.2s;
     white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
+  .tab-icon { font-size: 1.1rem; }
   .tab-btn:hover { color: var(--text); }
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
  
   /* ─── Tab content ───────────────────────────── */
-  .tab-pane { display: none; padding: 28px 24px; }
-  .tab-pane.active { display: block; }
+  .tab-pane { display: none; padding: 24px; max-width: 1200px; margin: 0 auto;}
+  .tab-pane.active { display: block; animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
  
   /* ─── Stat cards ────────────────────────────── */
   .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 16px;
     margin-bottom: 32px;
   }
   .stat-card {
     background: var(--bg2);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 16px;
     padding: 20px;
     position: relative;
     overflow: hidden;
     transition: transform 0.2s;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
   }
-  .stat-card:hover { transform: translateY(-2px); }
+  .stat-card:hover { transform: translateY(-2px); border-color: rgba(0,229,255,0.3); }
   .stat-card::before {
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 2px;
+    height: 3px;
     background: var(--accent);
   }
   .stat-card.home-type::before { background: var(--home); }
   .stat-card.out-type::before  { background: var(--out); }
   .stat-card.month-type::before { background: linear-gradient(90deg,var(--accent),var(--out)); }
  
-  .stat-label { font-size: 0.65rem; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px; }
-  .stat-val   { font-size: 1.5rem; font-weight: 500; color: var(--text); line-height: 1; }
-  .stat-sub   { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
+  .stat-label { font-size: 0.7rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; font-weight: 600;}
+  .stat-val   { font-size: 1.6rem; font-weight: 500; color: var(--text); line-height: 1; }
+  .stat-sub   { font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
  
   /* ─── Form ──────────────────────────────────── */
   .form-card {
     background: var(--bg2);
     border: 1px solid var(--border);
-    border-radius: 18px;
+    border-radius: 20px;
     padding: 28px;
     max-width: 620px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.15);
   }
   .form-title {
     font-family: 'Syne', sans-serif;
-    font-size: 1rem;
+    font-size: 1.1rem;
     font-weight: 700;
     color: var(--accent);
     letter-spacing: 1px;
@@ -606,71 +707,75 @@
   .form-group {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     flex: 1;
-    min-width: 120px;
+    min-width: 140px;
   }
   .form-group label {
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     color: var(--muted);
-    letter-spacing: 1.5px;
+    letter-spacing: 1px;
     text-transform: uppercase;
+    font-weight: 600;
   }
   .form-group input,
   .form-group select {
     background: var(--bg3);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 12px;
     color: var(--text);
     font-family: 'DM Mono', monospace;
-    font-size: 0.9rem;
-    padding: 10px 14px;
+    font-size: 1rem;
+    padding: 14px 16px;
     outline: none;
-    transition: border-color 0.2s;
+    transition: all 0.2s;
     width: 100%;
+    /* Increase touch target */
+    min-height: 48px;
   }
   .form-group input:focus,
-  .form-group select:focus { border-color: var(--accent); }
+  .form-group select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,229,255,0.1); }
  
   .toggle-row {
     display: flex;
     gap: 12px;
-    margin-bottom: 20px;
+    margin-bottom: 24px;
   }
   .method-btn {
     flex: 1;
-    padding: 14px;
+    padding: 16px;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 14px;
     background: var(--bg3);
     color: var(--muted);
     font-family: 'Syne', sans-serif;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-weight: 700;
     letter-spacing: 1px;
     cursor: pointer;
     transition: all 0.2s;
     text-transform: uppercase;
+    min-height: 52px;
   }
-  .method-btn.active-home { border-color: var(--home); color: var(--home); background: rgba(34,197,94,0.08); }
-  .method-btn.active-out  { border-color: var(--out);  color: var(--out);  background: rgba(249,115,22,0.08); }
+  .method-btn.active-home { border-color: var(--home); color: var(--home); background: rgba(34,197,94,0.1); }
+  .method-btn.active-out  { border-color: var(--out);  color: var(--out);  background: rgba(249,115,22,0.1); }
  
   .kseb-note {
     background: rgba(34,197,94,0.07);
     border: 1px solid rgba(34,197,94,0.2);
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 0.72rem;
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 0.75rem;
     color: #86efac;
     line-height: 1.6;
-    margin-bottom: 16px;
+    margin-bottom: 20px;
   }
  
   .cost-preview {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     color: var(--accent);
-    min-height: 20px;
-    margin-bottom: 20px;
+    min-height: 24px;
+    margin-bottom: 24px;
     font-weight: 500;
   }
  
@@ -678,63 +783,68 @@
     background: var(--accent);
     color: #0a0f1e;
     border: none;
-    border-radius: 10px;
+    border-radius: 12px;
     font-family: 'Syne', sans-serif;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     font-weight: 800;
     letter-spacing: 2px;
     text-transform: uppercase;
-    padding: 14px 32px;
+    padding: 16px 32px;
     cursor: pointer;
     transition: all 0.2s;
+    width: 100%;
+    min-height: 54px;
   }
-  .save-btn:hover { opacity: 0.85; transform: translateY(-1px); }
+  .save-btn:hover { opacity: 0.9; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,229,255,0.2); }
  
   /* ─── Sessions table ────────────────────────── */
   .section-title {
     font-family: 'Syne', sans-serif;
-    font-size: 0.8rem;
+    font-size: 0.9rem;
     font-weight: 700;
     color: var(--muted);
     letter-spacing: 2px;
     text-transform: uppercase;
-    margin-bottom: 16px;
-    margin-top: 32px;
+    margin-bottom: 20px;
+    margin-top: 10px;
   }
   .table-wrap {
     overflow-x: auto;
-    border-radius: 14px;
+    border-radius: 16px;
     border: 1px solid var(--border);
+    background: var(--bg2);
   }
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
   }
   thead th {
     background: var(--bg3);
     color: var(--muted);
-    font-size: 0.62rem;
-    font-weight: 400;
+    font-size: 0.65rem;
+    font-weight: 600;
     letter-spacing: 1.5px;
     text-transform: uppercase;
-    padding: 12px 16px;
+    padding: 16px;
     text-align: left;
     border-bottom: 1px solid var(--border);
+    white-space: nowrap;
   }
-  tbody tr { border-bottom: 1px solid rgba(30,58,95,0.4); transition: background 0.15s; }
-  tbody tr:hover { background: var(--bg3); }
-  tbody td { padding: 12px 16px; }
+  tbody tr { border-bottom: 1px solid rgba(30,58,95,0.4); transition: background 0.2s; }
+  tbody tr:hover { background: rgba(30,58,95,0.2); }
+  tbody td { padding: 16px; vertical-align: middle; }
   .mono { font-family: 'DM Mono', monospace; }
-  .cost { color: var(--accent); font-weight: 500; }
+  .cost { color: var(--accent); font-weight: 500; font-size: 0.95rem;}
   .empty-row { text-align: center; color: var(--muted); padding: 40px !important; }
  
   .badge {
     font-size: 0.65rem;
-    font-weight: 600;
-    padding: 4px 10px;
+    font-weight: 700;
+    padding: 6px 12px;
     border-radius: 100px;
     letter-spacing: 0.5px;
+    display: inline-block;
   }
   .badge.home    { background: rgba(34,197,94,0.15);  color: var(--home); border: 1px solid rgba(34,197,94,0.3); }
   .badge.outside { background: rgba(249,115,22,0.15); color: var(--out);  border: 1px solid rgba(249,115,22,0.3); }
@@ -743,155 +853,253 @@
     background: transparent;
     border: 1px solid rgba(239,68,68,0.3);
     color: #ef4444;
-    border-radius: 6px;
+    border-radius: 8px;
     cursor: pointer;
-    padding: 4px 8px;
-    font-size: 0.7rem;
-    transition: all 0.15s;
+    padding: 8px 12px;
+    font-size: 0.75rem;
+    transition: all 0.2s;
+    font-weight: 500;
   }
-  .del-btn:hover { background: rgba(239,68,68,0.1); }
+  .del-btn:hover { background: rgba(239,68,68,0.1); border-color: #ef4444;}
  
   /* ─── Reports ───────────────────────────────── */
-  .report-section { margin-bottom: 40px; }
+  .report-filters {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+    background: var(--bg2);
+    padding: 24px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+  }
+  .report-section { margin-bottom: 48px; }
   .report-label {
     font-family: 'Instrument Serif', serif;
-    font-size: 1.3rem;
+    font-size: 1.5rem;
     color: var(--text);
-    margin-bottom: 16px;
+    margin-bottom: 20px;
     font-style: italic;
   }
   .report-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 20px;
   }
   .report-card {
     background: var(--bg2);
     border-radius: 16px;
-    padding: 22px;
+    padding: 24px;
     border: 1px solid var(--border);
     position: relative;
     overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
   }
   .report-card::after {
     content: '';
     position: absolute;
     bottom: 0; left: 0; right: 0;
-    height: 3px;
+    height: 4px;
   }
   .home-card::after     { background: var(--home); }
   .out-card::after      { background: var(--out); }
   .combined-card::after { background: linear-gradient(90deg, var(--home), var(--out)); }
  
-  .rc-title { font-size: 0.65rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; }
-  .rc-stat  { font-size: 1.6rem; font-weight: 500; color: var(--text); }
-  .rc-stat span { font-size: 0.75rem; color: var(--muted); }
-  .rc-cost  { font-size: 1.1rem; color: var(--accent); margin-top: 6px; font-weight: 500; }
-  .rc-sub   { font-size: 0.65rem; color: var(--muted); margin-top: 6px; }
+  .rc-title { font-size: 0.7rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; font-weight: 600; }
+  .rc-stat  { font-size: 1.8rem; font-weight: 500; color: var(--text); }
+  .rc-stat span { font-size: 0.8rem; color: var(--muted); }
+  .rc-cost  { font-size: 1.2rem; color: var(--accent); margin-top: 8px; font-weight: 500; }
+  .rc-sub   { font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
  
   /* ─── Chart ─────────────────────────────────── */
   .chart-wrap {
     background: var(--bg2);
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: 20px;
     padding: 24px;
     margin-top: 32px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
   }
   .chart-title {
     font-family: 'Syne', sans-serif;
-    font-size: 0.75rem;
+    font-size: 0.85rem;
     font-weight: 700;
     color: var(--muted);
     letter-spacing: 2px;
     text-transform: uppercase;
-    margin-bottom: 16px;
+    margin-bottom: 24px;
     display: flex;
     align-items: center;
     gap: 16px;
+    flex-wrap: wrap;
   }
-  .legend-item { display: flex; align-items: center; gap: 6px; }
-  .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
-  canvas { width: 100%; height: 220px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-family: 'DM Mono', monospace; font-size: 0.8rem;}
+  .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+  canvas { width: 100%; height: auto; display: block; }
  
   /* ─── Settings ──────────────────────────────── */
   .settings-card {
     background: var(--bg2);
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: 20px;
     padding: 28px;
-    max-width: 480px;
+    max-width: 620px;
     margin-bottom: 24px;
   }
   .settings-title {
     font-family: 'Syne', sans-serif;
-    font-size: 0.8rem;
+    font-size: 0.9rem;
     font-weight: 700;
     color: var(--accent);
     letter-spacing: 1.5px;
     text-transform: uppercase;
     margin-bottom: 20px;
   }
-  .settings-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
-  .settings-row .form-group { max-width: 200px; }
+  .settings-row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+  .settings-row .form-group { flex: 1; min-width: 80px; }
   .settings-save-btn {
     background: transparent;
     border: 1px solid var(--accent);
     color: var(--accent);
-    border-radius: 8px;
+    border-radius: 12px;
     font-family: 'Syne', sans-serif;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     font-weight: 700;
     letter-spacing: 1px;
     text-transform: uppercase;
-    padding: 10px 20px;
+    padding: 12px 24px;
     cursor: pointer;
     transition: all 0.2s;
-    height: 42px;
+    height: 48px;
+    margin-top: 10px;
   }
   .settings-save-btn:hover { background: var(--accent); color: #0a0f1e; }
  
   .kseb-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.78rem;
-    margin-top: 12px;
+    font-size: 0.85rem;
+    margin-top: 16px;
   }
   .kseb-table th {
     color: var(--muted);
-    font-size: 0.62rem;
+    font-size: 0.65rem;
     letter-spacing: 1px;
     text-transform: uppercase;
-    padding: 8px 12px;
+    padding: 12px 16px;
     text-align: left;
     border-bottom: 1px solid var(--border);
   }
-  .kseb-table td { padding: 8px 12px; border-bottom: 1px solid rgba(30,58,95,0.3); }
-  .kseb-table td:last-child { color: var(--accent); }
+  .kseb-table td { padding: 12px 16px; border-bottom: 1px solid rgba(30,58,95,0.3); }
+  .kseb-table td:last-child { color: var(--accent); font-weight: 500; }
  
   /* ─── Toast ─────────────────────────────────── */
   .toast {
     position: fixed;
-    bottom: 24px; right: 24px;
+    bottom: 32px; right: 24px;
     background: var(--bg3);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 20px;
-    font-size: 0.8rem;
+    border-radius: 12px;
+    padding: 16px 24px;
+    font-size: 0.9rem;
     color: var(--text);
-    transform: translateY(80px);
+    transform: translateY(100px);
     opacity: 0;
-    transition: all 0.3s;
-    z-index: 999;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1000;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    font-weight: 500;
   }
   .toast.show { transform: translateY(0); opacity: 1; }
-  .toast.success { border-color: var(--home); }
-  .toast.error   { border-color: #ef4444; color: #fca5a5; }
+  .toast.success { border-left: 4px solid var(--home); }
+  .toast.error   { border-left: 4px solid #ef4444; color: #fca5a5; }
  
-  @media (max-width: 600px) {
-    .form-row { flex-direction: column; }
-    .header { flex-direction: column; }
-    .stats-grid { grid-template-columns: repeat(2, 1fr); }
-    .report-grid { grid-template-columns: 1fr; }
+  /* ═══════════ SMARTPHONE SPECIFIC CSS ═══════════ */
+  @media (max-width: 650px) {
+    /* Base spacing adjustments */
+    .header { padding: 16px 20px; }
+    .tab-pane { padding: 20px 16px 100px; } /* Bottom padding to clear nav bar */
+    .form-card, .chart-wrap, .report-filters, .settings-card { padding: 20px; border-radius: 16px;}
+    
+    .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .stat-val { font-size: 1.3rem; }
+    
+    .toggle-row { flex-direction: column; gap: 8px;}
+    .method-btn { padding: 14px; }
+
+    /* Sticky Bottom Navigation Bar for Mobile */
+    .tabs {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(17, 24, 39, 0.95);
+      backdrop-filter: blur(16px);
+      border-top: 1px solid var(--border);
+      border-bottom: none;
+      padding: 10px 8px;
+      /* Safe area inset support for newer iPhones */
+      padding-bottom: calc(10px + env(safe-area-inset-bottom));
+      justify-content: space-around;
+      gap: 0;
+      z-index: 100;
+    }
+    .tab-btn {
+      flex-direction: column;
+      font-size: 0.6rem;
+      padding: 8px;
+      border: none !important;
+      border-radius: 12px;
+      gap: 4px;
+      flex: 1;
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 500;
+    }
+    .tab-btn.active { 
+      background: rgba(0, 229, 255, 0.1); 
+      color: var(--accent);
+    }
+    .tab-icon { font-size: 1.2rem; margin-bottom: 2px;}
+
+    /* Card-Based Table Layout for Mobile (No Horizontal Scrolling) */
+    .table-wrap { background: transparent; border: none; overflow: visible;}
+    table, thead, tbody, th, td, tr { display: block; }
+    thead tr { display: none; } /* Hide headers */
+    tr.session-row { 
+      margin-bottom: 16px; 
+      border: 1px solid var(--border); 
+      border-radius: 16px; 
+      background: var(--bg2);
+      padding: 4px 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    td { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center;
+      padding: 12px 0; 
+      border: none; 
+      border-bottom: 1px solid rgba(255,255,255,0.05); 
+      text-align: right; 
+    }
+    td::before { 
+      content: attr(data-label); 
+      color: var(--muted); 
+      text-transform: uppercase; 
+      font-size: 0.65rem; 
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-align: left; 
+      font-family: 'Syne', sans-serif;
+    }
+    td:last-child { border-bottom: none; }
+    
+    .del-btn { padding: 10px 16px; font-size: 0.8rem; width: 100%; text-align: center;}
+    td[data-label="Action"] { display: block; padding-top: 16px; padding-bottom: 16px;}
+    td[data-label="Action"]::before { display: none; }
+    
+    .toast { bottom: 90px; left: 16px; right: 16px; text-align: center; }
   }
 </style>
 </head>
@@ -900,24 +1108,35 @@
 <div class="header">
   <div class="header-left">
     <div class="logo">EV<span>⚡</span>Track</div>
-    <div class="header-sub">Kerala EV Charge Monitor</div>
+    <div class="header-sub">Kerala Monitor</div>
   </div>
-  <div class="user-pill">Charging as <strong>Arjun V K</strong></div>
+  <div class="user-pill"><strong>Arjun V K</strong></div>
 </div>
  
+<!-- Mobile-friendly Bottom / Desktop Top Navigation -->
 <div class="tabs">
-  <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
-  <button class="tab-btn" data-tab="add" onclick="switchTab('add')">+ Add Session</button>
-  <button class="tab-btn" data-tab="sessions" onclick="switchTab('sessions')">All Sessions</button>
-  <button class="tab-btn" data-tab="reports" onclick="switchTab('reports')">Reports</button>
-  <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
+  <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">
+    <span class="tab-icon">📊</span><span class="tab-text">Dashboard</span>
+  </button>
+  <button class="tab-btn" data-tab="add" onclick="switchTab('add')">
+    <span class="tab-icon">⚡</span><span class="tab-text">Log</span>
+  </button>
+  <button class="tab-btn" data-tab="sessions" onclick="switchTab('sessions')">
+    <span class="tab-icon">📋</span><span class="tab-text">History</span>
+  </button>
+  <button class="tab-btn" data-tab="reports" onclick="switchTab('reports')">
+    <span class="tab-icon">📈</span><span class="tab-text">Reports</span>
+  </button>
+  <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">
+    <span class="tab-icon">⚙️</span><span class="tab-text">Settings</span>
+  </button>
 </div>
  
 <!-- ═══════════ DASHBOARD ═══════════ -->
 <div id="tab_dashboard" class="tab-pane active">
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="stat-label">Total kWh Charged</div>
+      <div class="stat-label">Total Energy</div>
       <div class="stat-val" id="stat_total_kwh">—</div>
       <div class="stat-sub">All time</div>
     </div>
@@ -937,29 +1156,25 @@
       <div class="stat-sub" id="stat_out_cost">—</div>
     </div>
     <div class="stat-card month-type">
-      <div class="stat-label">This Month — kWh</div>
+      <div class="stat-label">This Month</div>
       <div class="stat-val" id="stat_month_kwh">—</div>
       <div class="stat-sub" id="stat_month_cost">—</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Total Sessions</div>
-      <div class="stat-val" id="stat_sessions">—</div>
-      <div class="stat-sub">All time</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Avg Cost / kWh</div>
+      <div class="stat-label">Efficiency Rate</div>
       <div class="stat-val" id="stat_avg_rate">—</div>
-      <div class="stat-sub">Blended rate</div>
+      <div class="stat-sub">Blended average</div>
     </div>
   </div>
  
   <div class="chart-wrap">
     <div class="chart-title">
-      Monthly Spend
+      Monthly Spend Breakdown
+      <div style="flex: 1"></div>
       <span class="legend-item"><span class="legend-dot" style="background:var(--home)"></span>Home</span>
       <span class="legend-item"><span class="legend-dot" style="background:var(--out)"></span>Outside</span>
     </div>
-    <canvas id="monthly_chart" width="900" height="220"></canvas>
+    <canvas id="monthly_chart"></canvas>
   </div>
 </div>
  
@@ -980,7 +1195,7 @@
         this.className='method-btn active-out';
         document.getElementById('btn_home').className='method-btn';
         toggleMethod(); previewCost();
-      ">⚡ Outside (ChargeMOD)</button>
+      ">⚡ Outside (Fast)</button>
     </div>
  
     <input type="hidden" id="inp_method" value="home">
@@ -989,8 +1204,7 @@
       KSEB domestic slab tariff — 0–50: ₹3.25 | 51–100: ₹4.05 | 101–150: ₹5.10 | 151–200: ₹6.95 | 200+: ₹8.20
     </div>
     <div class="kseb-note" id="out_note" style="display:none;background:rgba(249,115,22,0.07);border-color:rgba(249,115,22,0.2);color:#fdba74;">
-      ChargeMOD: ₹9.00/kWh service + 18% GST = <strong>₹10.62/kWh effective</strong><br>
-      Verified from invoice: 1.845 kWh → ₹16.60 service + ₹2.99 GST = ₹19.59 ✓
+      ChargeMOD: ₹9.00/kWh service + 18% GST = <strong>₹10.62/kWh effective</strong>
     </div>
  
     <div class="form-row">
@@ -1015,8 +1229,8 @@
     <!-- OUTSIDE: direct kWh input from ChargeMOD app/invoice -->
     <div class="form-row" id="row_kwh" style="display:none">
       <div class="form-group">
-        <label>kWh Used (from ChargeMOD app or invoice)</label>
-        <input type="number" id="inp_kwh_direct" step="0.001" min="0" placeholder="e.g. 1.845" oninput="previewCost()" style="font-size:1.1rem;padding:12px 14px;">
+        <label>kWh Used (from app or invoice)</label>
+        <input type="number" id="inp_kwh_direct" step="0.001" min="0" placeholder="e.g. 1.845" oninput="previewCost()" style="font-size:1.1rem; font-weight: 600;">
       </div>
     </div>
  
@@ -1033,20 +1247,20 @@
     
     <div class="form-row">
       <div class="form-group">
-        <label>Note (optional)</label>
+        <label>Location / Note (optional)</label>
         <input type="text" id="inp_note" placeholder="e.g. Vismaya EVCS">
       </div>
     </div>
  
     <div class="cost-preview" id="cost_preview"></div>
  
-    <button class="save-btn" id="save_btn" onclick="saveSession()">Add Session</button>
+    <button class="save-btn" id="save_btn" onclick="saveSession()">Save Session</button>
   </div>
 </div>
  
 <!-- ═══════════ ALL SESSIONS ═══════════ -->
 <div id="tab_sessions" class="tab-pane">
-  <div class="section-title">All Charging Sessions</div>
+  <div class="section-title">Charging History</div>
   <div class="table-wrap">
     <table>
       <thead>
@@ -1054,7 +1268,7 @@
           <th>Method</th>
           <th>Date</th>
           <th>Battery</th>
-          <th>kWh</th>
+          <th>Energy</th>
           <th>Tariff</th>
           <th>Time</th>
           <th>Cost</th>
@@ -1070,6 +1284,22 @@
  
 <!-- ═══════════ REPORTS ═══════════ -->
 <div id="tab_reports" class="tab-pane">
+  
+  <div class="report-filters">
+    <div class="form-group">
+      <label>Week Of (Any day)</label>
+      <input type="date" id="filter_week" onchange="renderReports()">
+    </div>
+    <div class="form-group">
+      <label>Select Month</label>
+      <input type="month" id="filter_month" onchange="renderReports()">
+    </div>
+    <div class="form-group">
+      <label>Select Year</label>
+      <input type="number" id="filter_year" min="2020" max="2099" onchange="renderReports()">
+    </div>
+  </div>
+
   <div class="report-section" id="report_weekly"></div>
   <div class="report-section" id="report_monthly"></div>
   <div class="report-section" id="report_yearly"></div>
@@ -1079,29 +1309,29 @@
 <div id="tab_settings" class="tab-pane">
   <div class="settings-card">
     <div class="settings-title">⏱️ Home Charging Speed Calibration</div>
-    <div style="font-size:0.7rem; color:var(--muted); margin-bottom:16px; line-height:1.6;">
+    <div style="font-size:0.75rem; color:var(--muted); margin-bottom:16px; line-height:1.6;">
       Set a reference to auto-calculate charging time based on percentage added.<br>
       E.g. If 47% to 100% takes 3h 7m, set it here.
     </div>
-    <div class="settings-row" style="gap:10px;">
-      <div class="form-group" style="max-width:70px;">
+    <div class="settings-row" style="gap:12px;">
+      <div class="form-group">
         <label>Start %</label>
         <input type="number" id="calib_start" value="47">
       </div>
-      <div class="form-group" style="max-width:70px;">
+      <div class="form-group">
         <label>End %</label>
         <input type="number" id="calib_end" value="100">
       </div>
-      <div class="form-group" style="max-width:70px;">
+      <div class="form-group">
         <label>Hours</label>
         <input type="number" id="calib_h" value="3">
       </div>
-      <div class="form-group" style="max-width:70px;">
+      <div class="form-group">
         <label>Mins</label>
         <input type="number" id="calib_m" value="7">
       </div>
-      <button class="settings-save-btn" onclick="saveCalibration()" style="margin-left:auto;">Save</button>
     </div>
+    <button class="settings-save-btn" onclick="saveCalibration()" style="width: 100%; margin-top: 16px;">Save Calibration</button>
   </div>
  
   <div class="settings-card">
@@ -1111,17 +1341,16 @@
         <label>Battery Capacity (kWh)</label>
         <input type="number" id="battery_cap" step="0.01" min="1" placeholder="e.g. 3.97">
       </div>
-      <button class="settings-save-btn" onclick="saveBattery()">Save</button>
     </div>
-    <div style="margin-top:12px;font-size:0.7rem;color:var(--muted);line-height:1.6">
-      Your EV's usable battery capacity in kWh. Used to convert % charged → kWh.<br>
-      💡 <strong style="color:var(--accent)">Tip:</strong> For outside sessions, use the <strong>manual kWh field</strong> from your ChargeMOD invoice — it's more accurate than % calculation.<br>
-      From your invoice: 1.845 kWh used in 3H 7M session. Set capacity to match your vehicle.
+    <button class="settings-save-btn" onclick="saveBattery()" style="width: 100%;">Save Battery Config</button>
+    <div style="margin-top:16px;font-size:0.75rem;color:var(--muted);line-height:1.6">
+      Your EV's usable battery capacity in kWh. Used to convert % charged → kWh.<br><br>
+      💡 <strong style="color:var(--accent)">Tip:</strong> For outside sessions, use the <strong>manual kWh field</strong> from your ChargeMOD invoice — it's more accurate than % calculation.
     </div>
   </div>
  
   <div class="settings-card">
-    <div class="settings-title">🏠 KSEB Tariff Slabs (Kerala Domestic)</div>
+    <div class="settings-title">🏠 KSEB Tariff Slabs (Kerala)</div>
     <table class="kseb-table">
       <thead><tr><th>Units (kWh)</th><th>Rate</th></tr></thead>
       <tbody>
@@ -1135,20 +1364,18 @@
   </div>
  
   <div class="settings-card">
-    <div class="settings-title">⚡ ChargeMOD Tariff (Vismaya EVCS / Infopark)</div>
+    <div class="settings-title">⚡ ChargeMOD Tariff</div>
     <table class="kseb-table">
       <thead><tr><th>Component</th><th>Rate</th></tr></thead>
       <tbody>
-        <tr><td>Energy (NS / Non-Solar)</td><td>₹0.00 / kWh</td></tr>
+        <tr><td>Energy (NS)</td><td>₹0.00 / kWh</td></tr>
         <tr><td>Service Charge</td><td>₹9.00 / kWh</td></tr>
         <tr><td>GST (18%)</td><td>On service charge</td></tr>
         <tr><td>Effective Rate</td><td>₹10.62 / kWh</td></tr>
-        <tr><td>Solar hours</td><td>9:00 – 16:00 IST</td></tr>
-        <tr><td>Non-Solar hours</td><td>16:00 – 9:00 IST</td></tr>
       </tbody>
     </table>
-    <div style="margin-top:10px;font-size:0.65rem;color:var(--muted)">
-      Reference: Invoice #1775100500331__5851123 · 02-04-2026
+    <div style="margin-top:12px;font-size:0.7rem;color:var(--muted)">
+      Reference: Vismaya EVCS / Infopark
     </div>
   </div>
 </div>
