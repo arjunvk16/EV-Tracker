@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EV Charge Tracker — Arjun V K</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+
+<!-- Firebase SDKs -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAJ9K9fQ0ThMB7aXB6qNHr3_yLUdqJgnCM",
+    authDomain: "my-chain-reaction-game.firebaseapp.com",
+    projectId: "my-chain-reaction-game",
+    storageBucket: "my-chain-reaction-game.appspot.com",
+    messagingSenderId: "32751418407",
+    appId: "1:32751418407:web:ff8244007ef2b099d56202",
+    measurementId: "G-D6ZRG8LK2H"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // ─── KSEB Tariff Slabs (Kerala Domestic) ───────────────────────────────────
+  function ksebCost(units) {
+    let cost = 0;
+    if (units <= 50)        cost = units * 3.25;
+    else if (units <= 100)  cost = 50 * 3.25 + (units - 50) * 4.00;
+    else if (units <= 200)  cost = 50 * 3.25 + 50 * 4.00 + (units - 100) * 5.25;
+    else                    cost = 50 * 3.25 + 50 * 4.00 + 100 * 5.25 + (units - 200) * 6.85;
+    return parseFloat(cost.toFixed(2));
+  }
+
+  // ─── ChargeMOD Tariff (from invoice) ───────────────────────────────────────
+  // Energy: ₹0/kWh (NS tariff), Service: ₹9/kWh + 18% GST
+  function chargemodCost(kwh, tariffType = 'NS') {
+    const energyRate = tariffType === 'S' ? 0 : 0;
+    const serviceRate = tariffType === 'S' ? 9 : 9;
+    const energy = kwh * energyRate;
+    const service = kwh * serviceRate;
+    const gst = service * 0.18;
+    return {
+      energy: parseFloat(energy.toFixed(2)),
+      service: parseFloat(service.toFixed(2)),
+      gst: parseFloat(gst.toFixed(2)),
+      total: parseFloat((energy + service + gst).toFixed(2))
+    };
+  }
+
+  // ─── Battery capacity ──────────────────────────────────────────────────────
+  // From invoice: 1.845 kWh for a session — user's car battery capacity
+  // We'll let user set it, default 30 kWh (common EV in India)
+  function getCarCapacity() {
+    return parseFloat(localStorage.getItem('ev_battery_capacity') || '30');
+  }
+
+  function calcKwh(startPct, endPct) {
+    const cap = getCarCapacity();
+    return parseFloat(((endPct - startPct) / 100 * cap).toFixed(3));
+  }
+
+  // ─── Save session ──────────────────────────────────────────────────────────
+  window.saveSession = async function() {
+    const method   = document.getElementById('inp_method').value;
+    const date     = document.getElementById('inp_date').value;
+    const startPct = parseFloat(document.getElementById('inp_start').value);
+    const endPct   = parseFloat(document.getElementById('inp_end').value);
+    const tariff   = document.getElementById('inp_tariff').value;
+    const note     = document.getElementById('inp_note').value.trim();
+    const dur_h    = parseInt(document.getElementById('inp_dur_h').value || '0');
+    const dur_m    = parseInt(document.getElementById('inp_dur_m').value || '0');
+
+    if (!date || isNaN(startPct) || isNaN(endPct) || endPct <= startPct) {
+      showToast('Please fill all fields correctly. End % must be > Start %.', 'error');
+      return;
+    }
+
+    const kwh = calcKwh(startPct, endPct);
+    let cost = {}, costBreakdown = {};
+
+    if (method === 'home') {
+      const amt = ksebCost(kwh);
+      cost = { total: amt, energy: amt, service: 0, gst: 0 };
+      costBreakdown = { type: 'KSEB', rate: 'Slab-based', units: kwh };
+    } else {
+      const c = chargemodCost(kwh, tariff);
+      cost = c;
+      costBreakdown = { type: 'ChargeMOD', tariff, units: kwh };
+    }
+
+    const session = {
+      method, date, startPct, endPct, kwh,
+      cost: cost.total, energy: cost.energy,
+      service: cost.service, gst: cost.gst,
+      tariff: method === 'home' ? 'KSEB' : tariff,
+      duration: `${dur_h}h ${dur_m}m`,
+      note,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      showBtn('saving...');
+      await addDoc(collection(db, 'ev_sessions'), session);
+      showToast('Session saved! ⚡', 'success');
+      clearForm();
+      await loadAll();
+    } catch(e) {
+      showToast('Save failed: ' + e.message, 'error');
+    } finally {
+      showBtn('Add Session');
+    }
+  };
+
+  window.deleteSession = async function(id) {
+    if (!confirm('Delete this session?')) return;
+    try {
+      await deleteDoc(doc(db, 'ev_sessions', id));
+      showToast('Deleted.', 'success');
+      await loadAll();
+    } catch(e) {
+      showToast('Delete failed: ' + e.message, 'error');
+    }
+  };
+
+  // ─── Load & render ─────────────────────────────────────────────────────────
+  window.loadAll = async function() {
+    try {
+      const q = query(collection(db, 'ev_sessions'), orderBy('date', 'desc'));
+      const snap = await getDocs(q);
+      const sessions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      window._sessions = sessions;
+      renderDashboard(sessions);
+      renderTable(sessions);
+      renderReports(sessions);
+    } catch(e) {
+      console.error(e);
+      showToast('Load failed: ' + e.message, 'error');
+    }
+  };
+
+  function renderDashboard(sessions) {
+    const now = new Date();
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const monthly = sessions.filter(s => s.date.startsWith(thisMonth));
+
+    const totalKwh   = sessions.reduce((a,s) => a + (s.kwh || 0), 0);
+    const totalCost  = sessions.reduce((a,s) => a + (s.cost || 0), 0);
+    const homeKwh    = sessions.filter(s=>s.method==='home').reduce((a,s)=>a+(s.kwh||0),0);
+    const outKwh     = sessions.filter(s=>s.method==='outside').reduce((a,s)=>a+(s.kwh||0),0);
+    const homeCost   = sessions.filter(s=>s.method==='home').reduce((a,s)=>a+(s.cost||0),0);
+    const outCost    = sessions.filter(s=>s.method==='outside').reduce((a,s)=>a+(s.cost||0),0);
+    const mKwh       = monthly.reduce((a,s)=>a+(s.kwh||0),0);
+    const mCost      = monthly.reduce((a,s)=>a+(s.cost||0),0);
+
+    setEl('stat_total_kwh', totalKwh.toFixed(2) + ' kWh');
+    setEl('stat_total_cost', '₹' + totalCost.toFixed(2));
+    setEl('stat_home_kwh', homeKwh.toFixed(2) + ' kWh');
+    setEl('stat_home_cost', '₹' + homeCost.toFixed(2));
+    setEl('stat_out_kwh', outKwh.toFixed(2) + ' kWh');
+    setEl('stat_out_cost', '₹' + outCost.toFixed(2));
+    setEl('stat_month_kwh', mKwh.toFixed(2) + ' kWh');
+    setEl('stat_month_cost', '₹' + mCost.toFixed(2));
+    setEl('stat_sessions', sessions.length);
+    const avg = sessions.length ? (totalCost / totalKwh).toFixed(2) : '0';
+    setEl('stat_avg_rate', '₹' + avg + '/kWh');
+  }
+
+  function renderTable(sessions) {
+    const tbody = document.getElementById('sessions_tbody');
+    if (!sessions.length) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-row">No sessions yet. Add your first charge!</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = sessions.map(s => `
+      <tr class="session-row ${s.method}">
+        <td><span class="badge ${s.method}">${s.method === 'home' ? '🏠 Home' : '⚡ Outside'}</span></td>
+        <td>${formatDate(s.date)}</td>
+        <td class="mono">${s.startPct}% → ${s.endPct}%</td>
+        <td class="mono">${(s.kwh||0).toFixed(3)} kWh</td>
+        <td class="mono">${s.tariff || '—'}</td>
+        <td class="mono">${s.duration || '—'}</td>
+        <td class="mono cost">₹${(s.cost||0).toFixed(2)}</td>
+        <td><button class="del-btn" onclick="deleteSession('${s.id}')">✕</button></td>
+      </tr>
+    `).join('');
+  }
+
+  function renderReports(sessions) {
+    const now = new Date();
+
+    // ── Weekly ──────────────────────────────────────────
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay());
+    const weekly = sessions.filter(s => new Date(s.date) >= weekStart);
+    buildReport('report_weekly', weekly, 'This Week');
+
+    // ── Monthly ─────────────────────────────────────────
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const monthly = sessions.filter(s => s.date.startsWith(thisMonth));
+    buildReport('report_monthly', monthly, now.toLocaleString('default',{month:'long',year:'numeric'}));
+
+    // ── Yearly ──────────────────────────────────────────
+    const thisYear = now.getFullYear().toString();
+    const yearly = sessions.filter(s => s.date.startsWith(thisYear));
+    buildReport('report_yearly', yearly, thisYear);
+
+    // ── Monthly breakdown chart ──────────────────────────
+    buildMonthlyChart(sessions);
+  }
+
+  function buildReport(containerId, sessions, label) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const home = sessions.filter(s => s.method === 'home');
+    const out  = sessions.filter(s => s.method === 'outside');
+    const sum  = (arr, key) => arr.reduce((a,s) => a + (s[key]||0), 0);
+
+    el.innerHTML = `
+      <div class="report-label">${label}</div>
+      <div class="report-grid">
+        <div class="report-card home-card">
+          <div class="rc-title">🏠 Home (KSEB)</div>
+          <div class="rc-stat">${sum(home,'kwh').toFixed(2)} <span>kWh</span></div>
+          <div class="rc-cost">₹${sum(home,'cost').toFixed(2)}</div>
+          <div class="rc-sub">${home.length} session${home.length!==1?'s':''}</div>
+        </div>
+        <div class="report-card out-card">
+          <div class="rc-title">⚡ Outside (ChargeMOD)</div>
+          <div class="rc-stat">${sum(out,'kwh').toFixed(2)} <span>kWh</span></div>
+          <div class="rc-cost">₹${sum(out,'cost').toFixed(2)}</div>
+          <div class="rc-sub">${out.length} session${out.length!==1?'s':''} · GST ₹${sum(out,'gst').toFixed(2)}</div>
+        </div>
+        <div class="report-card combined-card">
+          <div class="rc-title">⚡+🏠 Combined</div>
+          <div class="rc-stat">${sum(sessions,'kwh').toFixed(2)} <span>kWh</span></div>
+          <div class="rc-cost">₹${sum(sessions,'cost').toFixed(2)}</div>
+          <div class="rc-sub">${sessions.length} total session${sessions.length!==1?'s':''}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function buildMonthlyChart(sessions) {
+    const canvas = document.getElementById('monthly_chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const monthMap = {};
+    sessions.forEach(s => {
+      const m = s.date.substring(0,7);
+      if (!monthMap[m]) monthMap[m] = { home: 0, outside: 0 };
+      monthMap[m][s.method] = (monthMap[m][s.method] || 0) + (s.cost || 0);
+    });
+    const months = Object.keys(monthMap).sort().slice(-12);
+    const homeData = months.map(m => monthMap[m].home || 0);
+    const outData  = months.map(m => monthMap[m].outside || 0);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!months.length) {
+      ctx.fillStyle = '#aaa';
+      ctx.font = '14px DM Mono';
+      ctx.fillText('No data yet', canvas.width/2 - 40, canvas.height/2);
+      return;
+    }
+
+    const W = canvas.width, H = canvas.height;
+    const pad = { l:50, r:20, t:20, b:50 };
+    const chartW = W - pad.l - pad.r;
+    const chartH = H - pad.t - pad.b;
+    const maxVal = Math.max(...months.map(m => (monthMap[m].home||0)+(monthMap[m].outside||0)), 1);
+    const barW = chartW / months.length;
+
+    // draw bars
+    months.forEach((m, i) => {
+      const x = pad.l + i * barW + barW * 0.1;
+      const bw = barW * 0.8;
+      const hh = (homeData[i] / maxVal) * chartH;
+      const oh = (outData[i] / maxVal) * chartH;
+      // outside (bottom)
+      ctx.fillStyle = '#f97316';
+      ctx.fillRect(x, pad.t + chartH - oh, bw, oh);
+      // home (on top)
+      ctx.fillStyle = '#22c55e';
+      ctx.fillRect(x, pad.t + chartH - oh - hh, bw, hh);
+      // label
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '10px DM Mono';
+      ctx.fillText(m.substring(5), x + bw/2 - 10, H - pad.b + 16);
+    });
+
+    // Y axis labels
+    ctx.fillStyle = '#64748b';
+    ctx.font = '10px DM Mono';
+    [0, 0.25, 0.5, 0.75, 1].forEach(t => {
+      const y = pad.t + chartH * (1 - t);
+      ctx.fillText('₹' + Math.round(maxVal * t), 0, y + 4);
+    });
+  }
+
+  // ─── Helpers ───────────────────────────────────────────────────────────────
+  function setEl(id, val) { const e = document.getElementById(id); if(e) e.textContent = val; }
+  function formatDate(d) { return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', {day:'numeric',month:'short',year:'numeric'}); }
+  function showToast(msg, type='success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast ' + type + ' show';
+    setTimeout(() => t.className = 'toast', 3000);
+  }
+  function showBtn(label) { const b = document.getElementById('save_btn'); if(b) b.textContent = label; }
+  function clearForm() {
+    ['inp_start','inp_end','inp_note','inp_dur_h','inp_dur_m'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+  }
+
+  // ─── Method toggle ─────────────────────────────────────────────────────────
+  window.toggleMethod = function() {
+    const method = document.getElementById('inp_method').value;
+    document.getElementById('tariff_row').style.display = method === 'outside' ? 'flex' : 'none';
+    document.getElementById('kseb_note').style.display  = method === 'home' ? 'block' : 'none';
+  };
+
+  // ─── Settings ──────────────────────────────────────────────────────────────
+  window.saveBattery = function() {
+    const v = parseFloat(document.getElementById('battery_cap').value);
+    if (isNaN(v) || v < 1) { showToast('Invalid capacity', 'error'); return; }
+    localStorage.setItem('ev_battery_capacity', v);
+    showToast(`Battery set to ${v} kWh`, 'success');
+  };
+
+  window.switchTab = function(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
+    document.getElementById('tab_' + tab).classList.add('active');
+  };
+
+  // ─── Preview cost live ─────────────────────────────────────────────────────
+  window.previewCost = function() {
+    const method  = document.getElementById('inp_method').value;
+    const startPc = parseFloat(document.getElementById('inp_start').value);
+    const endPc   = parseFloat(document.getElementById('inp_end').value);
+    const tariff  = document.getElementById('inp_tariff').value;
+    const previewEl = document.getElementById('cost_preview');
+    if (isNaN(startPc) || isNaN(endPc) || endPc <= startPc) {
+      previewEl.textContent = '';
+      return;
+    }
+    const kwh = calcKwh(startPc, endPc);
+    let txt = '';
+    if (method === 'home') {
+      txt = `~${kwh.toFixed(3)} kWh → ₹${ksebCost(kwh).toFixed(2)} (KSEB)`;
+    } else {
+      const c = chargemodCost(kwh, tariff);
+      txt = `~${kwh.toFixed(3)} kWh → ₹${c.total.toFixed(2)} (incl. GST ₹${c.gst.toFixed(2)})`;
+    }
+    previewEl.textContent = txt;
+  };
+
+  // ─── Boot ──────────────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', async () => {
+    const cap = localStorage.getItem('ev_battery_capacity') || '30';
+    const capEl = document.getElementById('battery_cap');
+    if (capEl) capEl.value = cap;
+    document.getElementById('inp_date').value = new Date().toISOString().split('T')[0];
+    toggleMethod();
+    await loadAll();
+  });
+</script>
+
+<style>
+  :root {
+    --bg: #0a0f1e;
+    --bg2: #111827;
+    --bg3: #1e2a3a;
+    --border: #1e3a5f;
+    --accent: #00e5ff;
+    --accent2: #f97316;
+    --green: #22c55e;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --home: #22c55e;
+    --out: #f97316;
+    --card-shadow: 0 4px 24px rgba(0,229,255,0.07);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    background-image: radial-gradient(ellipse at 20% 10%, rgba(0,229,255,0.04) 0%, transparent 60%),
+                      radial-gradient(ellipse at 80% 80%, rgba(249,115,22,0.04) 0%, transparent 60%);
+  }
+
+  /* ─── Header ─────────────────────────────────── */
+  .header {
+    padding: 32px 24px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .header-left { display: flex; align-items: baseline; gap: 16px; }
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.7rem;
+    font-weight: 800;
+    letter-spacing: -1px;
+    color: var(--accent);
+  }
+  .logo span { color: var(--accent2); }
+  .header-sub {
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .user-pill {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    padding: 6px 16px;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .user-pill strong { color: var(--accent); }
+
+  /* ─── Tabs ──────────────────────────────────── */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 16px 24px 0;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 10px 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ─── Tab content ───────────────────────────── */
+  .tab-pane { display: none; padding: 28px 24px; }
+  .tab-pane.active { display: block; }
+
+  /* ─── Stat cards ────────────────────────────── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .stat-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s;
+  }
+  .stat-card:hover { transform: translateY(-2px); }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+  }
+  .stat-card.home-type::before { background: var(--home); }
+  .stat-card.out-type::before  { background: var(--out); }
+  .stat-card.month-type::before { background: linear-gradient(90deg,var(--accent),var(--out)); }
+
+  .stat-label { font-size: 0.65rem; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px; }
+  .stat-val   { font-size: 1.5rem; font-weight: 500; color: var(--text); line-height: 1; }
+  .stat-sub   { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
+
+  /* ─── Form ──────────────────────────────────── */
+  .form-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 28px;
+    max-width: 620px;
+  }
+  .form-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .form-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-width: 120px;
+  }
+  .form-group label {
+    font-size: 0.65rem;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .form-group input,
+  .form-group select {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.9rem;
+    padding: 10px 14px;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+  }
+  .form-group input:focus,
+  .form-group select:focus { border-color: var(--accent); }
+
+  .toggle-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .method-btn {
+    flex: 1;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg3);
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+  .method-btn.active-home { border-color: var(--home); color: var(--home); background: rgba(34,197,94,0.08); }
+  .method-btn.active-out  { border-color: var(--out);  color: var(--out);  background: rgba(249,115,22,0.08); }
+
+  .kseb-note {
+    background: rgba(34,197,94,0.07);
+    border: 1px solid rgba(34,197,94,0.2);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.72rem;
+    color: #86efac;
+    line-height: 1.6;
+    margin-bottom: 16px;
+  }
+
+  .cost-preview {
+    font-size: 0.85rem;
+    color: var(--accent);
+    min-height: 20px;
+    margin-bottom: 20px;
+    font-weight: 500;
+  }
+
+  .save-btn {
+    background: var(--accent);
+    color: #0a0f1e;
+    border: none;
+    border-radius: 10px;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 14px 32px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .save-btn:hover { opacity: 0.85; transform: translateY(-1px); }
+
+  /* ─── Sessions table ────────────────────────── */
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    margin-top: 32px;
+  }
+  .table-wrap {
+    overflow-x: auto;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+  thead th {
+    background: var(--bg3);
+    color: var(--muted);
+    font-size: 0.62rem;
+    font-weight: 400;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr { border-bottom: 1px solid rgba(30,58,95,0.4); transition: background 0.15s; }
+  tbody tr:hover { background: var(--bg3); }
+  tbody td { padding: 12px 16px; }
+  .mono { font-family: 'DM Mono', monospace; }
+  .cost { color: var(--accent); font-weight: 500; }
+  .empty-row { text-align: center; color: var(--muted); padding: 40px !important; }
+
+  .badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 100px;
+    letter-spacing: 0.5px;
+  }
+  .badge.home    { background: rgba(34,197,94,0.15);  color: var(--home); border: 1px solid rgba(34,197,94,0.3); }
+  .badge.outside { background: rgba(249,115,22,0.15); color: var(--out);  border: 1px solid rgba(249,115,22,0.3); }
+
+  .del-btn {
+    background: transparent;
+    border: 1px solid rgba(239,68,68,0.3);
+    color: #ef4444;
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 0.7rem;
+    transition: all 0.15s;
+  }
+  .del-btn:hover { background: rgba(239,68,68,0.1); }
+
+  /* ─── Reports ───────────────────────────────── */
+  .report-section { margin-bottom: 40px; }
+  .report-label {
+    font-family: 'Instrument Serif', serif;
+    font-size: 1.3rem;
+    color: var(--text);
+    margin-bottom: 16px;
+    font-style: italic;
+  }
+  .report-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  .report-card {
+    background: var(--bg2);
+    border-radius: 16px;
+    padding: 22px;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .report-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .home-card::after     { background: var(--home); }
+  .out-card::after      { background: var(--out); }
+  .combined-card::after { background: linear-gradient(90deg, var(--home), var(--out)); }
+
+  .rc-title { font-size: 0.65rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; }
+  .rc-stat  { font-size: 1.6rem; font-weight: 500; color: var(--text); }
+  .rc-stat span { font-size: 0.75rem; color: var(--muted); }
+  .rc-cost  { font-size: 1.1rem; color: var(--accent); margin-top: 6px; font-weight: 500; }
+  .rc-sub   { font-size: 0.65rem; color: var(--muted); margin-top: 6px; }
+
+  /* ─── Chart ─────────────────────────────────── */
+  .chart-wrap {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-top: 32px;
+  }
+  .chart-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+  canvas { width: 100%; height: 220px; }
+
+  /* ─── Settings ──────────────────────────────── */
+  .settings-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    max-width: 480px;
+    margin-bottom: 24px;
+  }
+  .settings-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .settings-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .settings-row .form-group { max-width: 200px; }
+  .settings-save-btn {
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 8px;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    height: 42px;
+  }
+  .settings-save-btn:hover { background: var(--accent); color: #0a0f1e; }
+
+  .kseb-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    margin-top: 12px;
+  }
+  .kseb-table th {
+    color: var(--muted);
+    font-size: 0.62rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .kseb-table td { padding: 8px 12px; border-bottom: 1px solid rgba(30,58,95,0.3); }
+  .kseb-table td:last-child { color: var(--accent); }
+
+  /* ─── Toast ─────────────────────────────────── */
+  .toast {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 20px;
+    font-size: 0.8rem;
+    color: var(--text);
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.3s;
+    z-index: 999;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { border-color: var(--home); }
+  .toast.error   { border-color: #ef4444; color: #fca5a5; }
+
+  @media (max-width: 600px) {
+    .form-row { flex-direction: column; }
+    .header { flex-direction: column; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .report-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div class="logo">EV<span>⚡</span>Track</div>
+    <div class="header-sub">Kerala EV Charge Monitor</div>
+  </div>
+  <div class="user-pill">Charging as <strong>Arjun V K</strong></div>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
+  <button class="tab-btn" data-tab="add" onclick="switchTab('add')">+ Add Session</button>
+  <button class="tab-btn" data-tab="sessions" onclick="switchTab('sessions')">All Sessions</button>
+  <button class="tab-btn" data-tab="reports" onclick="switchTab('reports')">Reports</button>
+  <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
+</div>
+
+<!-- ═══════════ DASHBOARD ═══════════ -->
+<div id="tab_dashboard" class="tab-pane active">
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total kWh Charged</div>
+      <div class="stat-val" id="stat_total_kwh">—</div>
+      <div class="stat-sub">All time</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Spend</div>
+      <div class="stat-val" id="stat_total_cost">—</div>
+      <div class="stat-sub">All time</div>
+    </div>
+    <div class="stat-card home-type">
+      <div class="stat-label">🏠 Home (KSEB)</div>
+      <div class="stat-val" id="stat_home_kwh">—</div>
+      <div class="stat-sub" id="stat_home_cost">—</div>
+    </div>
+    <div class="stat-card out-type">
+      <div class="stat-label">⚡ Outside (ChargeMOD)</div>
+      <div class="stat-val" id="stat_out_kwh">—</div>
+      <div class="stat-sub" id="stat_out_cost">—</div>
+    </div>
+    <div class="stat-card month-type">
+      <div class="stat-label">This Month — kWh</div>
+      <div class="stat-val" id="stat_month_kwh">—</div>
+      <div class="stat-sub" id="stat_month_cost">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Sessions</div>
+      <div class="stat-val" id="stat_sessions">—</div>
+      <div class="stat-sub">All time</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Cost / kWh</div>
+      <div class="stat-val" id="stat_avg_rate">—</div>
+      <div class="stat-sub">Blended rate</div>
+    </div>
+  </div>
+
+  <div class="chart-wrap">
+    <div class="chart-title">
+      Monthly Spend
+      <span class="legend-item"><span class="legend-dot" style="background:var(--home)"></span>Home</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--out)"></span>Outside</span>
+    </div>
+    <canvas id="monthly_chart" width="900" height="220"></canvas>
+  </div>
+</div>
+
+<!-- ═══════════ ADD SESSION ═══════════ -->
+<div id="tab_add" class="tab-pane">
+  <div class="form-card">
+    <div class="form-title">⚡ Log Charging Session</div>
+
+    <div class="toggle-row">
+      <button class="method-btn active-home" id="btn_home" onclick="
+        document.getElementById('inp_method').value='home';
+        this.className='method-btn active-home';
+        document.getElementById('btn_out').className='method-btn';
+        toggleMethod(); previewCost();
+      ">🏠 Home (KSEB)</button>
+      <button class="method-btn" id="btn_out" onclick="
+        document.getElementById('inp_method').value='outside';
+        this.className='method-btn active-out';
+        document.getElementById('btn_home').className='method-btn';
+        toggleMethod(); previewCost();
+      ">⚡ Outside (ChargeMOD)</button>
+    </div>
+
+    <input type="hidden" id="inp_method" value="home">
+
+    <div class="kseb-note" id="kseb_note">
+      KSEB domestic slab tariff — 0–50 units: ₹3.25 | 51–100: ₹4.00 | 101–200: ₹5.25 | 200+: ₹6.85 per unit
+    </div>
+
+    <div class="form-row" id="tariff_row" style="display:none">
+      <div class="form-group">
+        <label>ChargeMOD Tariff</label>
+        <select id="inp_tariff" onchange="previewCost()">
+          <option value="NS">NS — Non-Solar (₹9/kWh + 18% GST)</option>
+          <option value="S">S — Solar (₹9/kWh + 18% GST)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>Date</label>
+        <input type="date" id="inp_date">
+      </div>
+      <div class="form-group">
+        <label>Start Battery %</label>
+        <input type="number" id="inp_start" min="0" max="100" placeholder="e.g. 20" oninput="previewCost()">
+      </div>
+      <div class="form-group">
+        <label>End Battery %</label>
+        <input type="number" id="inp_end" min="0" max="100" placeholder="e.g. 80" oninput="previewCost()">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>Duration — Hours</label>
+        <input type="number" id="inp_dur_h" min="0" max="24" placeholder="3">
+      </div>
+      <div class="form-group">
+        <label>Duration — Minutes</label>
+        <input type="number" id="inp_dur_m" min="0" max="59" placeholder="7">
+      </div>
+      <div class="form-group">
+        <label>Note (optional)</label>
+        <input type="text" id="inp_note" placeholder="e.g. Vismaya EVCS">
+      </div>
+    </div>
+
+    <div class="cost-preview" id="cost_preview"></div>
+
+    <button class="save-btn" id="save_btn" onclick="saveSession()">Add Session</button>
+  </div>
+</div>
+
+<!-- ═══════════ ALL SESSIONS ═══════════ -->
+<div id="tab_sessions" class="tab-pane">
+  <div class="section-title">All Charging Sessions</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th>Date</th>
+          <th>Battery</th>
+          <th>kWh</th>
+          <th>Tariff</th>
+          <th>Duration</th>
+          <th>Cost</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="sessions_tbody">
+        <tr><td colspan="8" class="empty-row">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════ REPORTS ═══════════ -->
+<div id="tab_reports" class="tab-pane">
+  <div class="report-section" id="report_weekly"></div>
+  <div class="report-section" id="report_monthly"></div>
+  <div class="report-section" id="report_yearly"></div>
+</div>
+
+<!-- ═══════════ SETTINGS ═══════════ -->
+<div id="tab_settings" class="tab-pane">
+  <div class="settings-card">
+    <div class="settings-title">🔋 Battery Configuration</div>
+    <div class="settings-row">
+      <div class="form-group">
+        <label>Battery Capacity (kWh)</label>
+        <input type="number" id="battery_cap" step="0.1" min="1" placeholder="30">
+      </div>
+      <button class="settings-save-btn" onclick="saveBattery()">Save</button>
+    </div>
+    <div style="margin-top:12px;font-size:0.7rem;color:var(--muted);line-height:1.6">
+      Your EV's usable battery capacity. Used to calculate kWh from % charged.<br>
+      From your ChargeMOD invoice: 1.845 kWh was used in a session — adjust based on your car.
+    </div>
+  </div>
+
+  <div class="settings-card">
+    <div class="settings-title">🏠 KSEB Tariff Slabs (Kerala Domestic)</div>
+    <table class="kseb-table">
+      <thead><tr><th>Units (kWh)</th><th>Rate</th></tr></thead>
+      <tbody>
+        <tr><td>0 – 50</td><td>₹3.25 / unit</td></tr>
+        <tr><td>51 – 100</td><td>₹4.00 / unit</td></tr>
+        <tr><td>101 – 200</td><td>₹5.25 / unit</td></tr>
+        <tr><td>200+</td><td>₹6.85 / unit</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="settings-card">
+    <div class="settings-title">⚡ ChargeMOD Tariff (Vismaya EVCS / Infopark)</div>
+    <table class="kseb-table">
+      <thead><tr><th>Component</th><th>Rate</th></tr></thead>
+      <tbody>
+        <tr><td>Energy (NS / Non-Solar)</td><td>₹0.00 / kWh</td></tr>
+        <tr><td>Service Charge</td><td>₹9.00 / kWh</td></tr>
+        <tr><td>GST (18%)</td><td>On service charge</td></tr>
+        <tr><td>Effective Rate</td><td>₹10.62 / kWh</td></tr>
+        <tr><td>Solar hours</td><td>9:00 – 16:00 IST</td></tr>
+        <tr><td>Non-Solar hours</td><td>16:00 – 9:00 IST</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:10px;font-size:0.65rem;color:var(--muted)">
+      Reference: Invoice #1775100500331__5851123 · 02-04-2026
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+</body>
+</html>
