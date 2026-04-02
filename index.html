@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>EV Charge Tracker — Arjun V K</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
-
+ 
 <!-- Firebase SDKs -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
+ 
   const firebaseConfig = {
     apiKey: "AIzaSyAJ9K9fQ0ThMB7aXB6qNHr3_yLUdqJgnCM",
     authDomain: "my-chain-reaction-game.firebaseapp.com",
@@ -20,10 +20,10 @@
     appId: "1:32751418407:web:ff8244007ef2b099d56202",
     measurementId: "G-D6ZRG8LK2H"
   };
-
+ 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-
+ 
   // ─── KSEB Tariff Slabs (Kerala Domestic) ───────────────────────────────────
   function ksebCost(units) {
     let cost = 0;
@@ -33,22 +33,20 @@
     else                    cost = 50 * 3.25 + 50 * 4.00 + 100 * 5.25 + (units - 200) * 6.85;
     return parseFloat(cost.toFixed(2));
   }
-
+ 
   // ─── ChargeMOD Tariff (from invoice) ───────────────────────────────────────
-  // Energy: ₹0/kWh (NS tariff), Service: ₹9/kWh + 18% GST on service only
-  // Verified: 1.845 kWh → service=16.605 → GST=2.988 → total=19.593 ≈ ₹19.59 ✓
   function chargemodCost(kwh) {
     const service = parseFloat((kwh * 9).toFixed(2));
     const gst     = parseFloat((service * 0.18).toFixed(2));
     const total   = parseFloat((service + gst).toFixed(2));
     return { energy: 0, service, gst, total };
   }
-
+ 
   // ─── Battery capacity ──────────────────────────────────────────────────────
   function getCarCapacity() {
     return parseFloat(localStorage.getItem('ev_battery_capacity') || '3.97');
   }
-
+ 
   // kWh from % range — OR use manual kWh entry if provided
   function getKwh() {
     const method = document.getElementById('inp_method').value;
@@ -62,25 +60,24 @@
     const cap = getCarCapacity();
     return parseFloat(((endPct - startPct) / 100 * cap).toFixed(3));
   }
-
+ 
   // ─── Save session ──────────────────────────────────────────────────────────
   window.saveSession = async function() {
     const method   = document.getElementById('inp_method').value;
     const date     = document.getElementById('inp_date').value;
     const startPct = parseFloat(document.getElementById('inp_start').value);
     const endPct   = parseFloat(document.getElementById('inp_end').value);
-    const tariff   = document.getElementById('inp_tariff').value;
     const note     = document.getElementById('inp_note').value.trim();
     const timeStart = document.getElementById('inp_time_start').value;
     const timeEnd   = document.getElementById('inp_time_end').value;
-
+ 
     const kwh = getKwh();
     if (!date || kwh === null || kwh <= 0) {
       if (method === 'home') showToast('Enter valid Start % and End % (end must be higher).', 'error');
       else showToast('Enter the kWh used from your ChargeMOD invoice/app.', 'error');
       return;
     }
-
+ 
     let cost = {};
     if (method === 'home') {
       const amt = ksebCost(kwh);
@@ -88,7 +85,7 @@
     } else {
       cost = chargemodCost(kwh);
     }
-
+ 
     const session = {
       method, date, startPct: startPct||null, endPct: endPct||null, kwh,
       cost: cost.total, energy: cost.energy,
@@ -106,7 +103,7 @@
       note,
       createdAt: new Date().toISOString()
     };
-
+ 
     try {
       showBtn('saving...');
       await addDoc(collection(db, 'ev_sessions'), session);
@@ -119,7 +116,7 @@
       showBtn('Add Session');
     }
   };
-
+ 
   window.deleteSession = async function(id) {
     if (!confirm('Delete this session?')) return;
     try {
@@ -130,7 +127,7 @@
       showToast('Delete failed: ' + e.message, 'error');
     }
   };
-
+ 
   // ─── Load & render ─────────────────────────────────────────────────────────
   window.loadAll = async function() {
     try {
@@ -146,12 +143,12 @@
       showToast('Load failed: ' + e.message, 'error');
     }
   };
-
+ 
   function renderDashboard(sessions) {
     const now = new Date();
     const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
     const monthly = sessions.filter(s => s.date.startsWith(thisMonth));
-
+ 
     const totalKwh   = sessions.reduce((a,s) => a + (s.kwh || 0), 0);
     const totalCost  = sessions.reduce((a,s) => a + (s.cost || 0), 0);
     const homeKwh    = sessions.filter(s=>s.method==='home').reduce((a,s)=>a+(s.kwh||0),0);
@@ -160,7 +157,7 @@
     const outCost    = sessions.filter(s=>s.method==='outside').reduce((a,s)=>a+(s.cost||0),0);
     const mKwh       = monthly.reduce((a,s)=>a+(s.kwh||0),0);
     const mCost      = monthly.reduce((a,s)=>a+(s.cost||0),0);
-
+ 
     setEl('stat_total_kwh', totalKwh.toFixed(2) + ' kWh');
     setEl('stat_total_cost', '₹' + totalCost.toFixed(2));
     setEl('stat_home_kwh', homeKwh.toFixed(2) + ' kWh');
@@ -173,7 +170,7 @@
     const avg = sessions.length ? (totalCost / totalKwh).toFixed(2) : '0';
     setEl('stat_avg_rate', '₹' + avg + '/kWh');
   }
-
+ 
   function renderTable(sessions) {
     const tbody = document.getElementById('sessions_tbody');
     if (!sessions.length) {
@@ -193,37 +190,37 @@
       </tr>
     `).join('');
   }
-
+ 
   function renderReports(sessions) {
     const now = new Date();
-
+ 
     // ── Weekly ──────────────────────────────────────────
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - now.getDay());
     const weekly = sessions.filter(s => new Date(s.date) >= weekStart);
     buildReport('report_weekly', weekly, 'This Week');
-
+ 
     // ── Monthly ─────────────────────────────────────────
     const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
     const monthly = sessions.filter(s => s.date.startsWith(thisMonth));
     buildReport('report_monthly', monthly, now.toLocaleString('default',{month:'long',year:'numeric'}));
-
+ 
     // ── Yearly ──────────────────────────────────────────
     const thisYear = now.getFullYear().toString();
     const yearly = sessions.filter(s => s.date.startsWith(thisYear));
     buildReport('report_yearly', yearly, thisYear);
-
+ 
     // ── Monthly breakdown chart ──────────────────────────
     buildMonthlyChart(sessions);
   }
-
+ 
   function buildReport(containerId, sessions, label) {
     const el = document.getElementById(containerId);
     if (!el) return;
     const home = sessions.filter(s => s.method === 'home');
     const out  = sessions.filter(s => s.method === 'outside');
     const sum  = (arr, key) => arr.reduce((a,s) => a + (s[key]||0), 0);
-
+ 
     el.innerHTML = `
       <div class="report-label">${label}</div>
       <div class="report-grid">
@@ -248,7 +245,7 @@
       </div>
     `;
   }
-
+ 
   function buildMonthlyChart(sessions) {
     const canvas = document.getElementById('monthly_chart');
     if (!canvas) return;
@@ -262,7 +259,7 @@
     const months = Object.keys(monthMap).sort().slice(-12);
     const homeData = months.map(m => monthMap[m].home || 0);
     const outData  = months.map(m => monthMap[m].outside || 0);
-
+ 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!months.length) {
       ctx.fillStyle = '#aaa';
@@ -270,14 +267,14 @@
       ctx.fillText('No data yet', canvas.width/2 - 40, canvas.height/2);
       return;
     }
-
+ 
     const W = canvas.width, H = canvas.height;
     const pad = { l:50, r:20, t:20, b:50 };
     const chartW = W - pad.l - pad.r;
     const chartH = H - pad.t - pad.b;
     const maxVal = Math.max(...months.map(m => (monthMap[m].home||0)+(monthMap[m].outside||0)), 1);
     const barW = chartW / months.length;
-
+ 
     // draw bars
     months.forEach((m, i) => {
       const x = pad.l + i * barW + barW * 0.1;
@@ -295,7 +292,7 @@
       ctx.font = '10px DM Mono';
       ctx.fillText(m.substring(5), x + bw/2 - 10, H - pad.b + 16);
     });
-
+ 
     // Y axis labels
     ctx.fillStyle = '#64748b';
     ctx.font = '10px DM Mono';
@@ -304,7 +301,7 @@
       ctx.fillText('₹' + Math.round(maxVal * t), 0, y + 4);
     });
   }
-
+ 
   // ─── Helpers ───────────────────────────────────────────────────────────────
   function setEl(id, val) { const e = document.getElementById(id); if(e) e.textContent = val; }
   function formatDate(d) { return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', {day:'numeric',month:'short',year:'numeric'}); }
@@ -322,7 +319,7 @@
     });
     document.getElementById('cost_preview').textContent = '';
   }
-
+ 
   // ─── Method toggle ─────────────────────────────────────────────────────────
   window.toggleMethod = function() {
     const method = document.getElementById('inp_method').value;
@@ -335,7 +332,7 @@
     document.getElementById('row_kwh').style.display    = method === 'outside' ? 'flex'  : 'none';
     previewCost();
   };
-
+ 
   // ─── Settings ──────────────────────────────────────────────────────────────
   window.saveBattery = function() {
     const v = parseFloat(document.getElementById('battery_cap').value);
@@ -343,21 +340,21 @@
     localStorage.setItem('ev_battery_capacity', v);
     showToast(`Battery set to ${v} kWh`, 'success');
   };
-
+ 
   window.switchTab = function(tab) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
     document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
     document.getElementById('tab_' + tab).classList.add('active');
   };
-
+ 
   // ─── Preview cost live ─────────────────────────────────────────────────────
   window.previewCost = function() {
     const method  = document.getElementById('inp_method').value;
     const previewEl = document.getElementById('cost_preview');
     const kwh = getKwh();
     if (!kwh || kwh <= 0) { previewEl.textContent = ''; return; }
-
+ 
     let txt = '';
     if (method === 'home') {
       txt = `${kwh.toFixed(3)} kWh → ₹${ksebCost(kwh).toFixed(2)} (KSEB slab rate)`;
@@ -367,7 +364,7 @@
     }
     previewEl.textContent = '≈ ' + txt;
   };
-
+ 
   // ─── Boot ──────────────────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', async () => {
     const cap = localStorage.getItem('ev_battery_capacity') || '3.97';
@@ -378,7 +375,7 @@
     await loadAll();
   });
 </script>
-
+ 
 <style>
   :root {
     --bg: #0a0f1e;
@@ -394,9 +391,9 @@
     --out: #f97316;
     --card-shadow: 0 4px 24px rgba(0,229,255,0.07);
   }
-
+ 
   * { box-sizing: border-box; margin: 0; padding: 0; }
-
+ 
   body {
     background: var(--bg);
     color: var(--text);
@@ -405,7 +402,7 @@
     background-image: radial-gradient(ellipse at 20% 10%, rgba(0,229,255,0.04) 0%, transparent 60%),
                       radial-gradient(ellipse at 80% 80%, rgba(249,115,22,0.04) 0%, transparent 60%);
   }
-
+ 
   /* ─── Header ─────────────────────────────────── */
   .header {
     padding: 32px 24px 20px;
@@ -440,7 +437,7 @@
     color: var(--muted);
   }
   .user-pill strong { color: var(--accent); }
-
+ 
   /* ─── Tabs ──────────────────────────────────── */
   .tabs {
     display: flex;
@@ -466,11 +463,11 @@
   }
   .tab-btn:hover { color: var(--text); }
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-
+ 
   /* ─── Tab content ───────────────────────────── */
   .tab-pane { display: none; padding: 28px 24px; }
   .tab-pane.active { display: block; }
-
+ 
   /* ─── Stat cards ────────────────────────────── */
   .stats-grid {
     display: grid;
@@ -498,11 +495,11 @@
   .stat-card.home-type::before { background: var(--home); }
   .stat-card.out-type::before  { background: var(--out); }
   .stat-card.month-type::before { background: linear-gradient(90deg,var(--accent),var(--out)); }
-
+ 
   .stat-label { font-size: 0.65rem; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px; }
   .stat-val   { font-size: 1.5rem; font-weight: 500; color: var(--text); line-height: 1; }
   .stat-sub   { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
-
+ 
   /* ─── Form ──────────────────────────────────── */
   .form-card {
     background: var(--bg2);
@@ -557,7 +554,7 @@
   }
   .form-group input:focus,
   .form-group select:focus { border-color: var(--accent); }
-
+ 
   .toggle-row {
     display: flex;
     gap: 12px;
@@ -580,7 +577,7 @@
   }
   .method-btn.active-home { border-color: var(--home); color: var(--home); background: rgba(34,197,94,0.08); }
   .method-btn.active-out  { border-color: var(--out);  color: var(--out);  background: rgba(249,115,22,0.08); }
-
+ 
   .kseb-note {
     background: rgba(34,197,94,0.07);
     border: 1px solid rgba(34,197,94,0.2);
@@ -591,7 +588,7 @@
     line-height: 1.6;
     margin-bottom: 16px;
   }
-
+ 
   .cost-preview {
     font-size: 0.85rem;
     color: var(--accent);
@@ -599,7 +596,7 @@
     margin-bottom: 20px;
     font-weight: 500;
   }
-
+ 
   .save-btn {
     background: var(--accent);
     color: #0a0f1e;
@@ -615,7 +612,7 @@
     transition: all 0.2s;
   }
   .save-btn:hover { opacity: 0.85; transform: translateY(-1px); }
-
+ 
   /* ─── Sessions table ────────────────────────── */
   .section-title {
     font-family: 'Syne', sans-serif;
@@ -654,7 +651,7 @@
   .mono { font-family: 'DM Mono', monospace; }
   .cost { color: var(--accent); font-weight: 500; }
   .empty-row { text-align: center; color: var(--muted); padding: 40px !important; }
-
+ 
   .badge {
     font-size: 0.65rem;
     font-weight: 600;
@@ -664,7 +661,7 @@
   }
   .badge.home    { background: rgba(34,197,94,0.15);  color: var(--home); border: 1px solid rgba(34,197,94,0.3); }
   .badge.outside { background: rgba(249,115,22,0.15); color: var(--out);  border: 1px solid rgba(249,115,22,0.3); }
-
+ 
   .del-btn {
     background: transparent;
     border: 1px solid rgba(239,68,68,0.3);
@@ -676,7 +673,7 @@
     transition: all 0.15s;
   }
   .del-btn:hover { background: rgba(239,68,68,0.1); }
-
+ 
   /* ─── Reports ───────────────────────────────── */
   .report-section { margin-bottom: 40px; }
   .report-label {
@@ -708,13 +705,13 @@
   .home-card::after     { background: var(--home); }
   .out-card::after      { background: var(--out); }
   .combined-card::after { background: linear-gradient(90deg, var(--home), var(--out)); }
-
+ 
   .rc-title { font-size: 0.65rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; }
   .rc-stat  { font-size: 1.6rem; font-weight: 500; color: var(--text); }
   .rc-stat span { font-size: 0.75rem; color: var(--muted); }
   .rc-cost  { font-size: 1.1rem; color: var(--accent); margin-top: 6px; font-weight: 500; }
   .rc-sub   { font-size: 0.65rem; color: var(--muted); margin-top: 6px; }
-
+ 
   /* ─── Chart ─────────────────────────────────── */
   .chart-wrap {
     background: var(--bg2);
@@ -738,7 +735,7 @@
   .legend-item { display: flex; align-items: center; gap: 6px; }
   .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
   canvas { width: 100%; height: 220px; }
-
+ 
   /* ─── Settings ──────────────────────────────── */
   .settings-card {
     background: var(--bg2);
@@ -775,7 +772,7 @@
     height: 42px;
   }
   .settings-save-btn:hover { background: var(--accent); color: #0a0f1e; }
-
+ 
   .kseb-table {
     width: 100%;
     border-collapse: collapse;
@@ -793,7 +790,7 @@
   }
   .kseb-table td { padding: 8px 12px; border-bottom: 1px solid rgba(30,58,95,0.3); }
   .kseb-table td:last-child { color: var(--accent); }
-
+ 
   /* ─── Toast ─────────────────────────────────── */
   .toast {
     position: fixed;
@@ -812,7 +809,7 @@
   .toast.show { transform: translateY(0); opacity: 1; }
   .toast.success { border-color: var(--home); }
   .toast.error   { border-color: #ef4444; color: #fca5a5; }
-
+ 
   @media (max-width: 600px) {
     .form-row { flex-direction: column; }
     .header { flex-direction: column; }
@@ -822,7 +819,7 @@
 </style>
 </head>
 <body>
-
+ 
 <div class="header">
   <div class="header-left">
     <div class="logo">EV<span>⚡</span>Track</div>
@@ -830,7 +827,7 @@
   </div>
   <div class="user-pill">Charging as <strong>Arjun V K</strong></div>
 </div>
-
+ 
 <div class="tabs">
   <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
   <button class="tab-btn" data-tab="add" onclick="switchTab('add')">+ Add Session</button>
@@ -838,7 +835,7 @@
   <button class="tab-btn" data-tab="reports" onclick="switchTab('reports')">Reports</button>
   <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
 </div>
-
+ 
 <!-- ═══════════ DASHBOARD ═══════════ -->
 <div id="tab_dashboard" class="tab-pane active">
   <div class="stats-grid">
@@ -878,7 +875,7 @@
       <div class="stat-sub">Blended rate</div>
     </div>
   </div>
-
+ 
   <div class="chart-wrap">
     <div class="chart-title">
       Monthly Spend
@@ -888,12 +885,12 @@
     <canvas id="monthly_chart" width="900" height="220"></canvas>
   </div>
 </div>
-
+ 
 <!-- ═══════════ ADD SESSION ═══════════ -->
 <div id="tab_add" class="tab-pane">
   <div class="form-card">
     <div class="form-title">⚡ Log Charging Session</div>
-
+ 
     <div class="toggle-row">
       <button class="method-btn active-home" id="btn_home" onclick="
         document.getElementById('inp_method').value='home';
@@ -908,9 +905,9 @@
         toggleMethod(); previewCost();
       ">⚡ Outside (ChargeMOD)</button>
     </div>
-
+ 
     <input type="hidden" id="inp_method" value="home">
-
+ 
     <div class="kseb-note" id="kseb_note">
       KSEB domestic slab tariff — 0–50 units: ₹3.25 | 51–100: ₹4.00 | 101–200: ₹5.25 | 200+: ₹6.85 per unit
     </div>
@@ -918,14 +915,14 @@
       ChargeMOD: ₹9.00/kWh service + 18% GST = <strong>₹10.62/kWh effective</strong><br>
       Verified from invoice: 1.845 kWh → ₹16.60 service + ₹2.99 GST = ₹19.59 ✓
     </div>
-
+ 
     <div class="form-row">
       <div class="form-group">
         <label>Date</label>
         <input type="date" id="inp_date">
       </div>
     </div>
-
+ 
     <!-- HOME: % inputs -->
     <div class="form-row" id="row_pct">
       <div class="form-group">
@@ -937,7 +934,7 @@
         <input type="number" id="inp_end" min="0" max="100" placeholder="e.g. 80" oninput="previewCost()">
       </div>
     </div>
-
+ 
     <!-- OUTSIDE: direct kWh input from ChargeMOD app/invoice -->
     <div class="form-row" id="row_kwh" style="display:none">
       <div class="form-group">
@@ -945,7 +942,7 @@
         <input type="number" id="inp_kwh_direct" step="0.001" min="0" placeholder="e.g. 1.845" oninput="previewCost()" style="font-size:1.1rem;padding:12px 14px;">
       </div>
     </div>
-
+ 
     <div class="form-row">
       <div class="form-group">
         <label>Start Time</label>
@@ -960,13 +957,13 @@
         <input type="text" id="inp_note" placeholder="e.g. Vismaya EVCS">
       </div>
     </div>
-
+ 
     <div class="cost-preview" id="cost_preview"></div>
-
+ 
     <button class="save-btn" id="save_btn" onclick="saveSession()">Add Session</button>
   </div>
 </div>
-
+ 
 <!-- ═══════════ ALL SESSIONS ═══════════ -->
 <div id="tab_sessions" class="tab-pane">
   <div class="section-title">All Charging Sessions</div>
@@ -990,14 +987,14 @@
     </table>
   </div>
 </div>
-
+ 
 <!-- ═══════════ REPORTS ═══════════ -->
 <div id="tab_reports" class="tab-pane">
   <div class="report-section" id="report_weekly"></div>
   <div class="report-section" id="report_monthly"></div>
   <div class="report-section" id="report_yearly"></div>
 </div>
-
+ 
 <!-- ═══════════ SETTINGS ═══════════ -->
 <div id="tab_settings" class="tab-pane">
   <div class="settings-card">
@@ -1015,7 +1012,7 @@
       From your invoice: 1.845 kWh used in 3H 7M session. Set capacity to match your vehicle.
     </div>
   </div>
-
+ 
   <div class="settings-card">
     <div class="settings-title">🏠 KSEB Tariff Slabs (Kerala Domestic)</div>
     <table class="kseb-table">
@@ -1028,7 +1025,7 @@
       </tbody>
     </table>
   </div>
-
+ 
   <div class="settings-card">
     <div class="settings-title">⚡ ChargeMOD Tariff (Vismaya EVCS / Infopark)</div>
     <table class="kseb-table">
@@ -1047,8 +1044,8 @@
     </div>
   </div>
 </div>
-
+ 
 <div id="toast" class="toast"></div>
-
+ 
 </body>
 </html>
