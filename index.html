@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>EV Charge Tracker — Arjun V K</title>
+<!-- PWA Meta Tags -->
+<meta name="theme-color" content="#0a0f1e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
  
 <!-- Firebase SDKs -->
@@ -519,8 +523,85 @@
     previewEl.textContent = '≈ ' + txt;
   };
  
+  // ─── PWA & Installability ──────────────────────────────────────────────────
+  let deferredPrompt;
+
+  function setupPWA() {
+    // 1. Inject Manifest dynamically
+    const manifest = {
+      name: "EV Charge Tracker",
+      short_name: "EV Track",
+      description: "Kerala EV Charge Monitor",
+      start_url: "./",
+      display: "standalone",
+      background_color: "#0a0f1e",
+      theme_color: "#0a0f1e",
+      icons: [{
+        src: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEzIDJMMyAxNGg5bC0xIDhsMTAtMTJoLTlsMS04eiIvPjwvc3ZnPg==",
+        sizes: "192x192",
+        type: "image/svg+xml"
+      }, {
+        src: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEzIDJMMyAxNGg5bC0xIDhsMTAtMTJoLTlsMS04eiIvPjwvc3ZnPg==",
+        sizes: "512x512",
+        type: "image/svg+xml"
+      }]
+    };
+    const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/manifest+json'});
+    const link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = URL.createObjectURL(manifestBlob);
+    document.head.appendChild(link);
+
+    // 2. Register Service Worker (will activate when hosted)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').then(reg => {
+        console.log('SW Registered');
+      }).catch(err => {
+        console.log('SW fetch failed (expected in Canvas). Use the Export PWA files button to host locally.');
+      });
+    }
+
+    // 3. Handle Install Prompt
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      const btn = document.getElementById('install_app_btn');
+      if (btn) btn.style.display = 'block';
+    });
+  }
+
+  window.installPWA = async function() {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        document.getElementById('install_app_btn').style.display = 'none';
+      }
+      deferredPrompt = null;
+    }
+  };
+
+  window.exportPWA = function() {
+    // Export Manifest
+    const manifestStr = `{\n  "name": "EV Charge Tracker",\n  "short_name": "EV Track",\n  "start_url": "./",\n  "display": "standalone",\n  "background_color": "#0a0f1e",\n  "theme_color": "#0a0f1e",\n  "icons": [\n    {\n      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEzIDJMMyAxNGg5bC0xIDhsMTAtMTJoLTlsMS04eiIvPjwvc3ZnPg==",\n      "sizes": "192x192",\n      "type": "image/svg+xml"\n    },\n    {\n      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEzIDJMMyAxNGg5bC0xIDhsMTAtMTJoLTlsMS04eiIvPjwvc3ZnPg==",\n      "sizes": "512x512",\n      "type": "image/svg+xml"\n    }\n  ]\n}`;
+    const a1 = document.createElement('a');
+    a1.href = URL.createObjectURL(new Blob([manifestStr], {type: 'application/json'}));
+    a1.download = 'manifest.json';
+    a1.click();
+
+    // Export SW
+    const swStr = `self.addEventListener('install', (e) => { self.skipWaiting(); });\nself.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });\nself.addEventListener('fetch', (e) => { /* Add offline caching here if needed */ });`;
+    const a2 = document.createElement('a');
+    a2.href = URL.createObjectURL(new Blob([swStr], {type: 'application/javascript'}));
+    a2.download = 'sw.js';
+    setTimeout(() => a2.click(), 500);
+    
+    showToast('PWA files downloaded! 📦', 'success');
+  };
+
   // ─── Boot ──────────────────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', async () => {
+    setupPWA();
     const cap = localStorage.getItem('ev_battery_capacity') || '3.97';
     const capEl = document.getElementById('battery_cap');
     if (capEl) capEl.value = cap;
@@ -1307,6 +1388,23 @@
  
 <!-- ═══════════ SETTINGS ═══════════ -->
 <div id="tab_settings" class="tab-pane">
+  
+  <div class="settings-card" style="border-color: var(--accent);">
+    <div class="settings-title" style="display:flex; justify-content:space-between; align-items:center;">
+      <span>📲 Install as App</span>
+    </div>
+    <div style="font-size:0.75rem; color:var(--muted); margin-bottom:16px; line-height:1.6;">
+      Install this tracker on your device's home screen for quick access. It behaves exactly like a native mobile app.
+    </div>
+    <button id="install_app_btn" class="settings-save-btn" onclick="installPWA()" style="width: 100%; display: none; background: var(--accent); color: #0a0f1e;">
+      Install App Now
+    </button>
+    <div style="margin-top:16px; font-size:0.7rem; color:var(--muted); border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
+      <em>Hosting elsewhere?</em> The app dynamically generates its manifest, but you can download the physical PWA config files below to include in your hosting folder.
+      <button class="settings-save-btn" onclick="exportPWA()" style="width: 100%; margin-top: 10px;">Export sw.js & manifest.json</button>
+    </div>
+  </div>
+
   <div class="settings-card">
     <div class="settings-title">⏱️ Home Charging Speed Calibration</div>
     <div style="font-size:0.75rem; color:var(--muted); margin-bottom:16px; line-height:1.6;">
