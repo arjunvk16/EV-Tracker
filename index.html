@@ -13,7 +13,7 @@
 <!-- Firebase SDKs -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getFirestore, collection, addDoc, getDocs, deleteDoc, updateDoc, doc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
  
   const firebaseConfig = {
     apiKey: "AIzaSyAJ9K9fQ0ThMB7aXB6qNHr3_yLUdqJgnCM",
@@ -114,6 +114,8 @@
   }
  
   // ─── Save session ──────────────────────────────────────────────────────────
+  window.currentEditId = null;
+
   window.saveSession = async function() {
     const method   = document.getElementById('inp_method').value;
     const date     = document.getElementById('inp_date').value;
@@ -138,6 +140,8 @@
       cost = chargemodCost(kwh);
     }
  
+    const oldSession = window.currentEditId ? window._sessions.find(x => x.id === window.currentEditId) : null;
+
     const session = {
       method, date, startPct: startPct||null, endPct: endPct||null, kwh,
       cost: cost.total, energy: cost.energy,
@@ -161,20 +165,25 @@
       timeStart: method === 'home' ? '' : timeStart,
       timeEnd: method === 'home' ? '' : timeEnd,
       note,
-      createdAt: new Date().toISOString()
+      createdAt: oldSession ? oldSession.createdAt : new Date().toISOString()
     };
  
     try {
       showBtn('Saving...');
-      await addDoc(collection(db, 'ev_sessions'), session);
-      showToast('Session saved! ⚡', 'success');
+      if (window.currentEditId) {
+        await updateDoc(doc(db, 'ev_sessions', window.currentEditId), session);
+        showToast('Session updated! ⚡', 'success');
+      } else {
+        await addDoc(collection(db, 'ev_sessions'), session);
+        showToast('Session saved! ⚡', 'success');
+      }
       clearForm();
       await loadAll();
       switchTab('dashboard'); // Auto redirect to dashboard
     } catch(e) {
       showToast('Save failed: ' + e.message, 'error');
     } finally {
-      showBtn('Add Session');
+      showBtn(window.currentEditId ? 'Update Session' : 'Save Session');
     }
   };
  
@@ -189,6 +198,40 @@
     }
   };
  
+  window.editSession = function(id) {
+    const s = window._sessions.find(x => x.id === id);
+    if (!s) return;
+    
+    window.currentEditId = id;
+    document.getElementById('inp_method').value = s.method;
+    document.getElementById('inp_date').value = s.date;
+    
+    if (s.method === 'home') {
+      document.getElementById('inp_start').value = s.startPct || '';
+      document.getElementById('inp_end').value = s.endPct || '';
+      document.getElementById('inp_kwh_direct').value = '';
+    } else {
+      document.getElementById('inp_start').value = '';
+      document.getElementById('inp_end').value = '';
+      document.getElementById('inp_kwh_direct').value = s.kwh || '';
+    }
+    
+    document.getElementById('inp_time_start').value = s.timeStart || '';
+    document.getElementById('inp_time_end').value = s.timeEnd || '';
+    document.getElementById('inp_note').value = s.note || '';
+    
+    // Update top toggle buttons styling manually
+    document.getElementById('btn_home').className = s.method === 'home' ? 'method-btn active-home' : 'method-btn';
+    document.getElementById('btn_out').className = s.method === 'outside' ? 'method-btn active-out' : 'method-btn';
+    
+    toggleMethod();
+    previewCost();
+    
+    document.getElementById('save_btn').textContent = 'Update Session';
+    switchTab('add');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // ─── Load & render ─────────────────────────────────────────────────────────
   window.loadAll = async function() {
     try {
@@ -248,7 +291,10 @@
         <td data-label="Tariff" class="mono">${s.tariff || '—'}</td>
         <td data-label="Time" class="mono">${s.timeStart && s.timeEnd ? s.timeStart+' – '+s.timeEnd : (s.duration||'—')}</td>
         <td data-label="Cost" class="mono cost">₹${(s.cost||0).toFixed(2)}</td>
-        <td data-label="Action"><button class="del-btn" onclick="deleteSession('${s.id}')">✕ Delete</button></td>
+        <td data-label="Action" class="action-cell">
+          <button class="edit-btn" onclick="editSession('${s.id}')">✎ Edit</button>
+          <button class="del-btn" onclick="deleteSession('${s.id}')">✕ Delete</button>
+        </td>
       </tr>
     `).join('');
   }
@@ -463,6 +509,8 @@
       if (el) el.value = '';
     });
     document.getElementById('cost_preview').textContent = '';
+    window.currentEditId = null;
+    document.getElementById('save_btn').textContent = 'Save Session';
   }
  
   // ─── Method toggle ─────────────────────────────────────────────────────────
@@ -930,6 +978,21 @@
   .badge.home    { background: rgba(34,197,94,0.15);  color: var(--home); border: 1px solid rgba(34,197,94,0.3); }
   .badge.outside { background: rgba(249,115,22,0.15); color: var(--out);  border: 1px solid rgba(249,115,22,0.3); }
  
+  .action-cell { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+
+  .edit-btn {
+    background: transparent;
+    border: 1px solid rgba(0,229,255,0.3);
+    color: var(--accent);
+    border-radius: 8px;
+    cursor: pointer;
+    padding: 8px 12px;
+    font-size: 0.75rem;
+    transition: all 0.2s;
+    font-weight: 500;
+  }
+  .edit-btn:hover { background: rgba(0,229,255,0.1); border-color: var(--accent); }
+
   .del-btn {
     background: transparent;
     border: 1px solid rgba(239,68,68,0.3);
@@ -1176,8 +1239,8 @@
     }
     td:last-child { border-bottom: none; }
     
-    .del-btn { padding: 10px 16px; font-size: 0.8rem; width: 100%; text-align: center;}
-    td[data-label="Action"] { display: block; padding-top: 16px; padding-bottom: 16px;}
+    .edit-btn, .del-btn { padding: 10px 16px; font-size: 0.8rem; flex: 1; text-align: center;}
+    td[data-label="Action"] { display: flex; flex-direction: row; gap: 8px; padding-top: 16px; padding-bottom: 16px; justify-content: center;}
     td[data-label="Action"]::before { display: none; }
     
     .toast { bottom: 90px; left: 16px; right: 16px; text-align: center; }
