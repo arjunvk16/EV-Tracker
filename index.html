@@ -1127,6 +1127,31 @@
   .kseb-table td { padding: 8px 12px; border-bottom: 1px solid rgba(30,58,95,0.3); }
   .kseb-table td:last-child { color: var(--accent); }
 
+  /* Install steps */
+  .install-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 0.73rem;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .step-num {
+    background: var(--border);
+    color: var(--accent);
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 0.65rem;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
   .settings-hint {
     font-size: 0.72rem;
     color: var(--muted);
@@ -1633,18 +1658,33 @@
     <div class="settings-hint" style="margin-bottom:16px">
       Install EV Tracker on your phone for a native app experience — works offline too.
     </div>
-    <div id="install_android_block">
-      <button class="settings-save-btn" onclick="installApp()" style="margin-bottom:12px" id="install_btn_settings">Install on Android / Chrome</button>
+    <div class="settings-hint" style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;line-height:2.1">
+      <strong style="color:var(--accent);display:block;margin-bottom:8px;font-size:0.8rem">Why the button doesn't work:</strong>
+      <span style="color:var(--muted);font-size:0.7rem">PWA install requires a hosted URL — local files can't be installed. Host on GitHub Pages (free, 2 min) then it works perfectly.</span>
     </div>
-    <div class="settings-hint" style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;line-height:2">
-      <strong style="color:var(--text);display:block;margin-bottom:6px">📱 iPhone (Safari):</strong>
-      1. Open this file in <strong style="color:var(--accent)">Safari</strong><br>
-      2. Tap the <strong style="color:var(--accent)">Share</strong> button (box with arrow)<br>
-      3. Scroll down → tap <strong style="color:var(--accent)">"Add to Home Screen"</strong><br>
-      4. Tap <strong style="color:var(--accent)">Add</strong> — done!<br><br>
-      <strong style="color:var(--text);display:block;margin-bottom:6px">🤖 Android (Chrome):</strong>
-      Tap the <strong style="color:var(--accent)">Install</strong> button above, or look for<br>
-      <strong style="color:var(--accent)">"Add to Home Screen"</strong> in Chrome's menu (⋮)
+
+    <div style="margin-top:16px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;">
+      <strong style="color:var(--text);display:block;margin-bottom:12px;font-family:'Syne',sans-serif;font-size:0.78rem;letter-spacing:1px;text-transform:uppercase">🚀 Host Free on GitHub Pages</strong>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="install-step"><span class="step-num">1</span><span>Go to <strong style="color:var(--accent)">github.com</strong> → sign in / create free account</span></div>
+        <div class="install-step"><span class="step-num">2</span><span>Click <strong style="color:var(--accent)">+</strong> (top right) → <strong style="color:var(--accent)">New repository</strong></span></div>
+        <div class="install-step"><span class="step-num">3</span><span>Name it <strong style="color:var(--accent)">ev-tracker</strong> → set to <strong style="color:var(--accent)">Public</strong> → Create</span></div>
+        <div class="install-step"><span class="step-num">4</span><span>Click <strong style="color:var(--accent)">uploading an existing file</strong> → upload <strong style="color:var(--accent)">ev-tracker.html</strong></span></div>
+        <div class="install-step"><span class="step-num">5</span><span>Rename the file to <strong style="color:var(--accent)">index.html</strong> before uploading</span></div>
+        <div class="install-step"><span class="step-num">6</span><span>Go to repo <strong style="color:var(--accent)">Settings</strong> → <strong style="color:var(--accent)">Pages</strong> → Source: <strong style="color:var(--accent)">main branch</strong> → Save</span></div>
+        <div class="install-step"><span class="step-num">7</span><span>Your URL: <strong style="color:var(--accent)">https://yourusername.github.io/ev-tracker</strong></span></div>
+        <div class="install-step"><span class="step-num">8</span><span>Open that URL in Chrome → tap <strong style="color:var(--accent)">⋮ menu → Add to Home Screen</strong></span></div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;">
+      <strong style="color:var(--text);display:block;margin-bottom:12px;font-family:'Syne',sans-serif;font-size:0.78rem;letter-spacing:1px;text-transform:uppercase">📱 iPhone (Safari) — no hosting needed</strong>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="install-step"><span class="step-num">1</span><span>Open the HTML file in <strong style="color:var(--accent)">Safari</strong></span></div>
+        <div class="install-step"><span class="step-num">2</span><span>Tap the <strong style="color:var(--accent)">Share</strong> button (□↑) at the bottom</span></div>
+        <div class="install-step"><span class="step-num">3</span><span>Scroll down → tap <strong style="color:var(--accent)">"Add to Home Screen"</strong></span></div>
+        <div class="install-step"><span class="step-num">4</span><span>Tap <strong style="color:var(--accent)">Add</strong> — appears on home screen instantly</span></div>
+      </div>
     </div>
   </div>
 
