@@ -65,12 +65,11 @@
 
   // ─── Save session ──────────────────────────────────────────────────────────
   window.saveSession = async function() {
-    const method   = document.getElementById('inp_method').value;
-    const date     = document.getElementById('inp_date').value;
-    const startPct = parseFloat(document.getElementById('inp_start').value);
-    const endPct   = parseFloat(document.getElementById('inp_end').value);
-    const tariff   = document.getElementById('inp_tariff').value;
-    const note     = document.getElementById('inp_note').value.trim();
+    const method    = document.getElementById('inp_method').value;
+    const date      = document.getElementById('inp_date').value;
+    const startPct  = parseFloat(document.getElementById('inp_start').value);
+    const endPct    = parseFloat(document.getElementById('inp_end').value);
+    const note      = document.getElementById('inp_note').value.trim();
     const timeStart = document.getElementById('inp_time_start').value;
     const timeEnd   = document.getElementById('inp_time_end').value;
 
@@ -93,7 +92,7 @@
       method, date, startPct: startPct||null, endPct: endPct||null, kwh,
       cost: cost.total, energy: cost.energy,
       service: cost.service, gst: cost.gst,
-      tariff: method === 'home' ? 'KSEB' : 'NS (₹9/kWh)',
+      tariff: method === 'home' ? 'KSEB' : 'ChargeMOD (₹9/kWh)',
       duration: (() => {
         if (!timeStart || !timeEnd) return '—';
         const [sh,sm] = timeStart.split(':').map(Number);
@@ -329,13 +328,18 @@
   // ─── Method toggle ─────────────────────────────────────────────────────────
   window.toggleMethod = function() {
     const method = document.getElementById('inp_method').value;
-    // Notes
-    document.getElementById('kseb_note').style.display  = method === 'home'    ? 'block' : 'none';
-    document.getElementById('out_note').style.display   = method === 'outside' ? 'block' : 'none';
-    // Home: show % inputs, hide direct kWh
-    document.getElementById('row_pct').style.display    = method === 'home'    ? 'flex'  : 'none';
-    // Outside: show direct kWh, hide % inputs
-    document.getElementById('row_kwh').style.display    = method === 'outside' ? 'flex'  : 'none';
+    document.getElementById('kseb_note').style.display   = method === 'home'    ? 'block' : 'none';
+    document.getElementById('out_note').style.display    = method === 'outside' ? 'block' : 'none';
+    // Home: % only. Outside: kWh + times
+    document.getElementById('row_pct').style.display     = method === 'home'    ? 'flex'  : 'none';
+    document.getElementById('row_outside').style.display = method === 'outside' ? 'block' : 'none';
+    // Clear time fields when switching to home
+    if (method === 'home') {
+      const ts = document.getElementById('inp_time_start');
+      const te = document.getElementById('inp_time_end');
+      if (ts) ts.value = '';
+      if (te) te.value = '';
+    }
     previewCost();
   };
 
@@ -344,7 +348,148 @@
     const v = parseFloat(document.getElementById('battery_cap').value);
     if (isNaN(v) || v < 1) { showToast('Invalid capacity', 'error'); return; }
     localStorage.setItem('ev_battery_capacity', v);
-    showToast(`Battery set to ${v} kWh`, 'success');
+    showToast(`Battery capacity set to ${v} kWh ✓`, 'success');
+    updateCapDisplay();
+  };
+
+  function updateCapDisplay() {
+    const cap = getCarCapacity();
+    const el = document.getElementById('cap_display');
+    if (el) el.textContent = cap + ' kWh';
+    // Also show saved charger speed if available
+    const spd = localStorage.getItem('ev_charger_speed_kw');
+    const spdEl = document.getElementById('charger_speed_saved');
+    const spdVal = document.getElementById('saved_speed_val');
+    if (spd && spdEl && spdVal) {
+      spdEl.style.display = 'block';
+      spdVal.textContent = spd;
+    }
+  }
+
+  // ─── Calibration from known ChargeMOD session ──────────────────────────────
+  window._calibratedCap = null;
+
+  window.runCalibration = function() {
+    const start = parseFloat(document.getElementById('cal_start').value);
+    const end   = parseFloat(document.getElementById('cal_end').value);
+    const kwh   = parseFloat(document.getElementById('cal_kwh').value);
+    const resEl = document.getElementById('cal_result');
+
+    if (isNaN(start) || isNaN(end) || isNaN(kwh) || end <= start || kwh <= 0) {
+      resEl.style.display = 'none';
+      return;
+    }
+    const pctDiff = end - start;
+    const capacity = kwh / (pctDiff / 100);
+    window._calibratedCap = parseFloat(capacity.toFixed(2));
+
+    document.getElementById('cal_result_val').textContent = window._calibratedCap + ' kWh';
+    document.getElementById('cal_result_sub').textContent =
+      `Based on ${pctDiff}% change = ${kwh} kWh → full battery ≈ ${window._calibratedCap} kWh`;
+    resEl.style.display = 'block';
+  };
+
+  window.applyCalibration = function() {
+    if (!window._calibratedCap) return;
+    localStorage.setItem('ev_battery_capacity', window._calibratedCap);
+    const capEl = document.getElementById('battery_cap');
+    if (capEl) capEl.value = window._calibratedCap;
+    showToast(`Calibrated! Battery set to ${window._calibratedCap} kWh ✓`, 'success');
+    updateCapDisplay();
+  };
+
+  // ─── Home charging calibrator ────────────────────────────────────────────────
+  window.runEstimator = function() {
+    const start     = parseFloat(document.getElementById('est_start').value);
+    const end       = parseFloat(document.getElementById('est_end').value);
+    const timeStart = document.getElementById('est_time_start').value;
+    const timeEnd   = document.getElementById('est_time_end').value;
+    const resEl     = document.getElementById('est_result');
+
+    if (isNaN(start) || isNaN(end) || end <= start || !timeStart || !timeEnd) {
+      resEl.style.display = 'none';
+      return;
+    }
+
+    // Duration
+    const [sh, sm] = timeStart.split(':').map(Number);
+    const [eh, em] = timeEnd.split(':').map(Number);
+    let diffMins = (eh * 60 + em) - (sh * 60 + sm);
+    if (diffMins <= 0) diffMins += 24 * 60; // handles overnight
+    const diffH = Math.floor(diffMins / 60);
+    const diffM = diffMins % 60;
+    const durationStr = diffH > 0 ? `${diffH}h ${diffM}m` : `${diffM}m`;
+
+    // kWh from battery capacity
+    const cap     = getCarCapacity();
+    const kwh     = parseFloat(((end - start) / 100 * cap).toFixed(3));
+    const hours   = diffMins / 60;
+    const speedKw = parseFloat((kwh / hours).toFixed(2));
+
+    window._lastCalcSpeed = speedKw;
+    document.getElementById('est_duration').textContent  = durationStr;
+    document.getElementById('est_kwh').textContent       = kwh.toFixed(3) + ' kWh';
+    document.getElementById('est_speed_out').textContent = speedKw + ' kW';
+    document.getElementById('est_cost_home').textContent = '₹' + ksebCost(kwh).toFixed(2);
+    resEl.style.display = 'block';
+  };
+
+  // Save charger speed from calibration
+  window.saveChargerSpeed = function() {
+    const speed = window._lastCalcSpeed;
+    if (!speed) { showToast('Run the calibration first.', 'error'); return; }
+    localStorage.setItem('ev_charger_speed_kw', speed);
+    document.getElementById('charger_speed_saved').style.display = 'block';
+    document.getElementById('saved_speed_val').textContent = speed;
+    showToast(`Charger speed saved: ${speed} kW ✓`, 'success');
+    updateCapDisplay();
+  };
+
+  // Log the calibrated session directly as a home session
+  window.logFromEstimator = async function() {
+    const start     = parseFloat(document.getElementById('est_start').value);
+    const end       = parseFloat(document.getElementById('est_end').value);
+    const timeStart = document.getElementById('est_time_start').value;
+    const timeEnd   = document.getElementById('est_time_end').value;
+
+    if (isNaN(start) || isNaN(end) || end <= start || !timeStart || !timeEnd) {
+      showToast('Fill in all fields first.', 'error'); return;
+    }
+
+    const cap  = getCarCapacity();
+    const kwh  = parseFloat(((end - start) / 100 * cap).toFixed(3));
+    const amt  = ksebCost(kwh);
+
+    const [sh, sm] = timeStart.split(':').map(Number);
+    const [eh, em] = timeEnd.split(':').map(Number);
+    let diffMins = (eh * 60 + em) - (sh * 60 + sm);
+    if (diffMins <= 0) diffMins += 24 * 60;
+    const duration = `${Math.floor(diffMins/60)}h ${diffMins%60}m`;
+
+    const session = {
+      method: 'home',
+      date: new Date().toISOString().split('T')[0],
+      startPct: start, endPct: end, kwh,
+      cost: amt, energy: amt, service: 0, gst: 0,
+      tariff: 'KSEB',
+      duration, timeStart, timeEnd,
+      note: 'Logged from calibrator',
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      showToast('Saving...', 'success');
+      await addDoc(collection(db, 'ev_sessions'), session);
+      showToast('Home session logged! ✓', 'success');
+      // Clear fields
+      ['est_start','est_end','est_time_start','est_time_end'].forEach(id => {
+        document.getElementById(id).value = '';
+      });
+      document.getElementById('est_result').style.display = 'none';
+      await loadAll();
+    } catch(e) {
+      showToast('Save failed: ' + e.message, 'error');
+    }
   };
 
   const TAB_ORDER = ['dashboard', 'add', 'sessions', 'reports', 'settings'];
@@ -440,9 +585,10 @@
 
   // ─── Boot ──────────────────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', async () => {
-    const cap = localStorage.getItem('ev_battery_capacity') || '3.97';
+    const cap = localStorage.getItem('ev_battery_capacity') || '30';
     const capEl = document.getElementById('battery_cap');
     if (capEl) capEl.value = cap;
+    updateCapDisplay();
     document.getElementById('inp_date').value = new Date().toISOString().split('T')[0];
     toggleMethod();
     await loadAll();
@@ -864,6 +1010,71 @@
   .kseb-table td { padding: 8px 12px; border-bottom: 1px solid rgba(30,58,95,0.3); }
   .kseb-table td:last-child { color: var(--accent); }
 
+  .settings-hint {
+    font-size: 0.72rem;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  /* ─── Calibration result box ─── */
+  .cal-result {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    margin-top: 16px;
+  }
+  .cal-result-label {
+    font-size: 0.62rem;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .cal-result-val {
+    font-size: 2rem;
+    font-weight: 500;
+    color: var(--accent);
+    font-family: 'Syne', sans-serif;
+    line-height: 1;
+  }
+  .cal-result-sub {
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-top: 8px;
+    line-height: 1.6;
+  }
+
+  /* ─── Estimator result grid ─── */
+  .est-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .est-item {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+  }
+  .est-label {
+    font-size: 0.6rem;
+    color: var(--muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .est-val {
+    font-size: 1.2rem;
+    font-weight: 500;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+  }
+  @media (max-width: 600px) {
+    .est-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .est-val { font-size: 1rem; }
+  }
+
   /* ─── Toast ─────────────────────────────────── */
   .toast {
     position: fixed;
@@ -1114,7 +1325,7 @@
       </div>
     </div>
 
-    <!-- HOME: % inputs -->
+    <!-- HOME: % inputs only, no time needed -->
     <div class="form-row" id="row_pct">
       <div class="form-group">
         <label>Start Battery %</label>
@@ -1126,23 +1337,27 @@
       </div>
     </div>
 
-    <!-- OUTSIDE: direct kWh input from ChargeMOD app/invoice -->
-    <div class="form-row" id="row_kwh" style="display:none">
-      <div class="form-group">
-        <label>kWh Used (from ChargeMOD app or invoice)</label>
-        <input type="number" id="inp_kwh_direct" step="0.001" min="0" placeholder="e.g. 1.845" oninput="previewCost()" style="font-size:1.1rem;padding:12px 14px;">
+    <!-- OUTSIDE: kWh + start/end time from ChargeMOD -->
+    <div id="row_outside" style="display:none">
+      <div class="form-row">
+        <div class="form-group">
+          <label>kWh Used (from ChargeMOD app or invoice)</label>
+          <input type="number" id="inp_kwh_direct" step="0.001" min="0" placeholder="e.g. 1.845" oninput="previewCost()" style="font-size:1.1rem;padding:12px 14px;">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Start Time</label>
+          <input type="time" id="inp_time_start">
+        </div>
+        <div class="form-group">
+          <label>End Time</label>
+          <input type="time" id="inp_time_end">
+        </div>
       </div>
     </div>
 
     <div class="form-row">
-      <div class="form-group">
-        <label>Start Time</label>
-        <input type="time" id="inp_time_start">
-      </div>
-      <div class="form-group">
-        <label>End Time</label>
-        <input type="time" id="inp_time_end">
-      </div>
       <div class="form-group">
         <label>Note (optional)</label>
         <input type="text" id="inp_note" placeholder="e.g. Vismaya EVCS">
@@ -1188,52 +1403,139 @@
 
 <!-- ═══════════ SETTINGS ═══════════ -->
 <div id="tab_settings" class="tab-pane">
+
+  <!-- 1. Battery Capacity -->
   <div class="settings-card">
-    <div class="settings-title">🔋 Battery Configuration</div>
+    <div class="settings-title">🔋 Battery Capacity</div>
     <div class="settings-row">
       <div class="form-group">
-        <label>Battery Capacity (kWh)</label>
-        <input type="number" id="battery_cap" step="0.01" min="1" placeholder="e.g. 3.97">
+        <label>Usable Capacity (kWh)</label>
+        <input type="number" id="battery_cap" step="0.01" min="1" placeholder="e.g. 30">
       </div>
       <button class="settings-save-btn" onclick="saveBattery()">Save</button>
     </div>
-    <div style="margin-top:12px;font-size:0.7rem;color:var(--muted);line-height:1.6">
-      Your EV's usable battery capacity in kWh. Used to convert % charged → kWh.<br>
-      💡 <strong style="color:var(--accent)">Tip:</strong> For outside sessions, use the <strong>manual kWh field</strong> from your ChargeMOD invoice — it's more accurate than % calculation.<br>
-      From your invoice: 1.845 kWh used in 3H 7M session. Set capacity to match your vehicle.
+    <div class="settings-hint">
+      Used to convert battery % → kWh for home sessions.<br>
+      Currently saved: <strong id="cap_display" style="color:var(--accent)">—</strong>
     </div>
   </div>
 
+  <!-- 2. Calibrate from a known outside session -->
+  <div class="settings-card">
+    <div class="settings-title">🎯 Calibrate from ChargeMOD Session</div>
+    <div class="settings-hint" style="margin-bottom:16px">
+      You know the exact kWh from ChargeMOD. Enter the % change + kWh to calculate your real battery capacity.
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Start Battery %</label>
+        <input type="number" id="cal_start" min="0" max="100" placeholder="e.g. 18" oninput="runCalibration()">
+      </div>
+      <div class="form-group">
+        <label>End Battery %</label>
+        <input type="number" id="cal_end" min="0" max="100" placeholder="e.g. 37" oninput="runCalibration()">
+      </div>
+      <div class="form-group">
+        <label>Actual kWh (from invoice)</label>
+        <input type="number" id="cal_kwh" step="0.001" min="0" placeholder="e.g. 1.845" oninput="runCalibration()">
+      </div>
+    </div>
+    <div id="cal_result" class="cal-result" style="display:none">
+      <div class="cal-result-label">Calculated Battery Capacity</div>
+      <div class="cal-result-val" id="cal_result_val">—</div>
+      <div class="cal-result-sub" id="cal_result_sub">—</div>
+      <button class="settings-save-btn" style="margin-top:12px" onclick="applyCalibration()">Apply this Capacity</button>
+    </div>
+  </div>
+
+  <!-- 3. Home charging calibration tool -->
+  <div class="settings-card">
+    <div class="settings-title">🏠 Home Charging Calibrator</div>
+    <div class="settings-hint" style="margin-bottom:16px">
+      Did a home charge but don't know the exact kWh? Enter the battery % and plug-in times — it calculates duration, kWh used, and KSEB cost automatically.
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Start Battery %</label>
+        <input type="number" id="est_start" min="0" max="100" placeholder="e.g. 20" oninput="runEstimator()">
+      </div>
+      <div class="form-group">
+        <label>End Battery %</label>
+        <input type="number" id="est_end" min="0" max="100" placeholder="e.g. 80" oninput="runEstimator()">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Plug-in Time</label>
+        <input type="time" id="est_time_start" oninput="runEstimator()">
+      </div>
+      <div class="form-group">
+        <label>Unplugged Time</label>
+        <input type="time" id="est_time_end" oninput="runEstimator()">
+      </div>
+    </div>
+    <div id="est_result" class="cal-result" style="display:none">
+      <div class="est-grid">
+        <div class="est-item">
+          <div class="est-label">Duration</div>
+          <div class="est-val" id="est_duration">—</div>
+        </div>
+        <div class="est-item">
+          <div class="est-label">kWh Charged</div>
+          <div class="est-val" id="est_kwh">—</div>
+        </div>
+        <div class="est-item">
+          <div class="est-label">Charger Speed</div>
+          <div class="est-val" id="est_speed_out">—</div>
+        </div>
+        <div class="est-item">
+          <div class="est-label">KSEB Cost</div>
+          <div class="est-val" id="est_cost_home">—</div>
+        </div>
+      </div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="settings-save-btn" onclick="saveChargerSpeed()" style="background:rgba(0,229,255,0.08);border-color:var(--accent);color:var(--accent)">💾 Save Charger Speed</button>
+        <button class="settings-save-btn" onclick="logFromEstimator()">+ Log as Home Session</button>
+      </div>
+    </div>
+    <div id="charger_speed_saved" class="settings-hint" style="margin-top:10px;display:none">
+      ✓ Saved: Charger speed <strong id="saved_speed_val" style="color:var(--accent)">—</strong> kW · used to estimate home session duration
+    </div>
+  </div>
+
+  <!-- 4. KSEB Tariff reference -->
   <div class="settings-card">
     <div class="settings-title">🏠 KSEB Tariff Slabs (Kerala Domestic)</div>
     <table class="kseb-table">
-      <thead><tr><th>Units (kWh)</th><th>Rate</th></tr></thead>
+      <thead><tr><th>Units (kWh)</th><th>Rate per unit</th></tr></thead>
       <tbody>
-        <tr><td>0 – 50</td><td>₹3.25 / unit</td></tr>
-        <tr><td>51 – 100</td><td>₹4.00 / unit</td></tr>
-        <tr><td>101 – 200</td><td>₹5.25 / unit</td></tr>
-        <tr><td>200+</td><td>₹6.85 / unit</td></tr>
+        <tr><td>0 – 50</td><td>₹3.25</td></tr>
+        <tr><td>51 – 100</td><td>₹4.00</td></tr>
+        <tr><td>101 – 200</td><td>₹5.25</td></tr>
+        <tr><td>200+</td><td>₹6.85</td></tr>
       </tbody>
     </table>
   </div>
 
+  <!-- 5. ChargeMOD tariff reference -->
   <div class="settings-card">
-    <div class="settings-title">⚡ ChargeMOD Tariff (Vismaya EVCS / Infopark)</div>
+    <div class="settings-title">⚡ ChargeMOD Tariff (Vismaya EVCS)</div>
     <table class="kseb-table">
       <thead><tr><th>Component</th><th>Rate</th></tr></thead>
       <tbody>
-        <tr><td>Energy (NS / Non-Solar)</td><td>₹0.00 / kWh</td></tr>
-        <tr><td>Service Charge</td><td>₹9.00 / kWh</td></tr>
-        <tr><td>GST (18%)</td><td>On service charge</td></tr>
-        <tr><td>Effective Rate</td><td>₹10.62 / kWh</td></tr>
-        <tr><td>Solar hours</td><td>9:00 – 16:00 IST</td></tr>
-        <tr><td>Non-Solar hours</td><td>16:00 – 9:00 IST</td></tr>
+        <tr><td>Energy charge</td><td>₹0.00 / kWh</td></tr>
+        <tr><td>Service charge</td><td>₹9.00 / kWh</td></tr>
+        <tr><td>GST (18% on service)</td><td>₹1.62 / kWh</td></tr>
+        <tr><td>Effective total</td><td>₹10.62 / kWh</td></tr>
+        <tr><td>Solar tariff hours</td><td>09:00 – 16:00 IST</td></tr>
+        <tr><td>Non-solar hours</td><td>16:00 – 09:00 IST</td></tr>
       </tbody>
     </table>
     <div style="margin-top:10px;font-size:0.65rem;color:var(--muted)">
-      Reference: Invoice #1775100500331__5851123 · 02-04-2026
+      Verified · Invoice #1775100500331__5851123 · 02-04-2026
     </div>
   </div>
+
 </div>
 
 </div><!-- /tabs-slider -->
