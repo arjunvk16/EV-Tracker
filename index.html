@@ -1,1436 +1,1727 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Vitality | Health Tracker</title>
-    <style>
-        :root {
-            --bg: #121212;
-            --surface: #1e1e1e;
-            --surface-light: #2c2c2c;
-            --primary: #bb86fc;
-            --primary-variant: #3700b3;
-            --secondary: #03dac6;
-            --text-main: #ffffff;
-            --text-muted: #a0a0a0;
-            --border: #333333;
-            --danger: #cf6679;
-            --success: #4caf50;
-            --warning: #ffb74d;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>EV Charge Tracker</title>
 
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+<!-- PWA Meta -->
+<meta name="application-name" content="EV Tracker">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="EV Tracker">
+<meta name="theme-color" content="#0a0f1e">
+<meta name="description" content="Track your EV charging costs — KSEB home & ChargeMOD outside">
 
-        body {
-            background-color: var(--bg);
-            color: var(--text-main);
-            display: flex;
-            justify-content: center;
-            min-height: 100vh;
-            overflow-x: hidden;
-        }
+<!-- PWA Manifest (inline as data URI) -->
+<link rel="manifest" href="data:application/manifest+json,{
+  %22name%22:%22EV Charge Tracker%22,
+  %22short_name%22:%22EV Tracker%22,
+  %22description%22:%22Track EV charging costs — KSEB & ChargeMOD%22,
+  %22start_url%22:%22.%22,
+  %22display%22:%22standalone%22,
+  %22background_color%22:%22%230a0f1e%22,
+  %22theme_color%22:%22%230a0f1e%22,
+  %22orientation%22:%22portrait%22,
+  %22icons%22:[
+    {%22src%22:%22data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%230a0f1e'/%3E%3Ctext x='96' y='130' font-size='110' text-anchor='middle'%3E⚡%3C/text%3E%3C/svg%3E%22,%22sizes%22:%22192x192%22,%22type%22:%22image/svg+xml%22},
+    {%22src%22:%22data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='%230a0f1e'/%3E%3Ctext x='256' y='360' font-size='300' text-anchor='middle'%3E⚡%3C/text%3E%3C/svg%3E%22,%22sizes%22:%22512x512%22,%22type%22:%22image/svg+xml%22}
+  ]
+}">
 
-        #app-container {
-            width: 100%;
-            max-width: 480px;
-            background-color: var(--bg);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-        }
+<!-- iOS splash / icon fallback -->
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%230a0f1e'/%3E%3Ctext x='90' y='125' font-size='100' text-anchor='middle'%3E⚡%3C/text%3E%3C/svg%3E">
 
-        /* Typography & Inputs */
-        h1, h2, h3 { font-weight: 600; margin-bottom: 12px; }
-        p { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 10px; }
-        
-        input, select, button {
-            width: 100%;
-            padding: 12px;
-            margin-bottom: 12px;
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            background-color: var(--surface-light);
-            color: var(--text-main);
-            font-size: 1rem;
-            outline: none;
-        }
-        
-        input:focus, select:focus { border-color: var(--primary); }
-        
-        button {
-            background-color: var(--primary);
-            color: #000;
-            font-weight: bold;
-            border: none;
-            cursor: pointer;
-            transition: opacity 0.2s;
-        }
-        button:active { opacity: 0.8; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        button.secondary { background-color: transparent; color: var(--primary); border: 1px solid var(--primary); }
-        button.small { padding: 8px; font-size: 0.9rem; width: auto; flex-shrink: 0; }
-        button.danger { background-color: transparent; color: var(--danger); border: 1px solid var(--danger); }
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 
-        /* Sections & Cards */
-        .view-section {
-            display: none;
-            padding: 20px;
-            flex: 1;
-            padding-bottom: 80px;
-            animation: fadeIn 0.3s ease-in-out;
-        }
-        .view-section.active { display: block; }
+<!-- Service Worker registration -->
+<script>
+  if ('serviceWorker' in navigator) {
+    const swCode = `
+      const CACHE = 'ev-tracker-v1';
+      const ASSETS = [self.location.href];
+      self.addEventListener('install', e => {
+        e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
+        self.skipWaiting();
+      });
+      self.addEventListener('activate', e => {
+        e.waitUntil(caches.keys().then(keys =>
+          Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+        ));
+        self.clients.claim();
+      });
+      self.addEventListener('fetch', e => {
+        e.respondWith(
+          fetch(e.request).catch(() => caches.match(e.request))
+        );
+      });
+    `;
+    const blob = new Blob([swCode], { type: 'application/javascript' });
+    const swUrl = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(swUrl).catch(() => {});
+  }
+</script>
 
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+<!-- Firebase SDKs -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-        .card {
-            background-color: var(--surface);
-            padding: 16px;
-            border-radius: 12px;
-            margin-bottom: 16px;
-            border: 1px solid var(--border);
-        }
+  const firebaseConfig = {
+    apiKey: "AIzaSyAJ9K9fQ0ThMB7aXB6qNHr3_yLUdqJgnCM",
+    authDomain: "my-chain-reaction-game.firebaseapp.com",
+    projectId: "my-chain-reaction-game",
+    storageBucket: "my-chain-reaction-game.appspot.com",
+    messagingSenderId: "32751418407",
+    appId: "1:32751418407:web:ff8244007ef2b099d56202",
+    measurementId: "G-D6ZRG8LK2H"
+  };
 
-        /* Layout Utilities */
-        .flex-row { display: flex; gap: 10px; align-items: center; }
-        .flex-between { display: flex; justify-content: space-between; align-items: center; }
-        .hidden { display: none !important; }
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        
-        /* Progress & Metrics */
-        .metric-highlight { color: var(--primary); font-weight: bold; font-size: 1.2rem; }
-        .progress-bar { width: 100%; height: 8px; background: var(--border); border-radius: 4px; margin-top: 5px; overflow: hidden; }
-        .progress-fill { height: 100%; background: var(--primary); transition: width 0.3s ease; }
-        .progress-fill.success { background: var(--success); }
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
 
-        .badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: bold;
-            background: var(--surface-light);
-        }
+  // ─── KSEB Tariff Slabs (Kerala Domestic) ───────────────────────────────────
+  function ksebCost(units) {
+    let cost = 0;
+    if (units <= 50)        cost = units * 3.25;
+    else if (units <= 100)  cost = 50 * 3.25 + (units - 50) * 4.00;
+    else if (units <= 200)  cost = 50 * 3.25 + 50 * 4.00 + (units - 100) * 5.25;
+    else                    cost = 50 * 3.25 + 50 * 4.00 + 100 * 5.25 + (units - 200) * 6.85;
+    return parseFloat(cost.toFixed(2));
+  }
 
-        /* Lists */
-        .list-item {
-            background: var(--surface-light);
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.9rem;
-        }
+  // ─── ChargeMOD Tariff (from invoice) ───────────────────────────────────────
+  // Energy: ₹0/kWh (NS tariff), Service: ₹9/kWh + 18% GST on service only
+  // Verified: 1.845 kWh → service=16.605 → GST=2.988 → total=19.593 ≈ ₹19.59 ✓
+  function chargemodCost(kwh) {
+    const service = parseFloat((kwh * 9).toFixed(2));
+    const gst     = parseFloat((service * 0.18).toFixed(2));
+    const total   = parseFloat((service + gst).toFixed(2));
+    return { energy: 0, service, gst, total };
+  }
 
-        .friend-item {
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .friend-item:active { background: var(--border); }
+  // ─── Battery capacity ──────────────────────────────────────────────────────
+  function getCarCapacity() {
+    return parseFloat(localStorage.getItem('ev_battery_capacity') || '3.07');
+  }
 
-        /* Bottom Nav */
-        nav {
-            position: fixed;
-            bottom: 0;
-            width: 100%;
-            max-width: 480px;
-            background-color: var(--surface);
-            border-top: 1px solid var(--border);
-            display: flex;
-            justify-content: space-around;
-            padding: 12px 0;
-            z-index: 100;
-            display: none;
-        }
-        nav.active { display: flex; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-        
-        .nav-item {
-            color: var(--text-muted);
-            text-decoration: none;
-            font-size: 0.75rem;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            cursor: pointer;
-        }
-        .nav-item.active { color: var(--primary); }
-        .nav-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  // kWh from % range — OR use manual kWh entry if provided
+  function getKwh() {
+    const method = document.getElementById('inp_method').value;
+    if (method === 'outside') {
+      const v = parseFloat(document.getElementById('inp_kwh_direct').value);
+      return (!isNaN(v) && v > 0) ? parseFloat(v.toFixed(3)) : null;
+    }
+    const startPct = parseFloat(document.getElementById('inp_start').value);
+    const endPct   = parseFloat(document.getElementById('inp_end').value);
+    if (isNaN(startPct) || isNaN(endPct) || endPct <= startPct) return null;
+    const cap = getCarCapacity();
+    return parseFloat(((endPct - startPct) / 100 * cap).toFixed(3));
+  }
 
-        /* Overlays & Modals */
-        #toast {
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background-color: var(--secondary);
-            color: #000;
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-weight: bold;
-            font-size: 0.9rem;
-            z-index: 1000;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s;
-        }
-        #toast.show { opacity: 1; }
+  // ─── Save session ──────────────────────────────────────────────────────────
+  window.saveSession = async function() {
+    const method    = document.getElementById('inp_method').value;
+    const date      = document.getElementById('inp_date').value;
+    const startPct  = parseFloat(document.getElementById('inp_start').value);
+    const endPct    = parseFloat(document.getElementById('inp_end').value);
+    const note      = document.getElementById('inp_note').value.trim();
+    const timeStart = document.getElementById('inp_time_start').value;
+    const timeEnd   = document.getElementById('inp_time_end').value;
 
-        .modal-overlay {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8);
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .vs-bar {
-            height: 12px; width: 100%; background: var(--surface-light); border-radius: 6px; overflow: hidden; display: flex; margin: 15px 0;
-        }
-        .vs-fill-me { height: 100%; background: var(--primary); transition: width 0.5s; }
-        .vs-fill-friend { height: 100%; background: var(--secondary); transition: width 0.5s; }
+    const kwh = getKwh();
+    if (!date || kwh === null || kwh <= 0) {
+      if (method === 'home') showToast('Enter valid Start % and End % (end must be higher).', 'error');
+      else showToast('Enter the kWh used from your ChargeMOD invoice/app.', 'error');
+      return;
+    }
 
-    </style>
+    let cost = {};
+    if (method === 'home') {
+      const amt = ksebCost(kwh);
+      cost = { total: amt, energy: amt, service: 0, gst: 0 };
+    } else {
+      cost = chargemodCost(kwh);
+    }
+
+    const session = {
+      method, date, startPct: startPct||null, endPct: endPct||null, kwh,
+      cost: cost.total, energy: cost.energy,
+      service: cost.service, gst: cost.gst,
+      tariff: method === 'home' ? 'KSEB' : 'ChargeMOD (₹9/kWh)',
+      duration: (() => {
+        if (!timeStart || !timeEnd) return '—';
+        const [sh,sm] = timeStart.split(':').map(Number);
+        const [eh,em] = timeEnd.split(':').map(Number);
+        let diff = (eh*60+em) - (sh*60+sm);
+        if (diff < 0) diff += 24*60;
+        return `${Math.floor(diff/60)}h ${diff%60}m`;
+      })(),
+      timeStart, timeEnd,
+      note,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      showBtn('saving...');
+      await addDoc(collection(db, 'ev_sessions'), session);
+      showToast('Session saved! ⚡', 'success');
+      clearForm();
+      await loadAll();
+    } catch(e) {
+      showToast('Save failed: ' + e.message, 'error');
+    } finally {
+      showBtn('Add Session');
+    }
+  };
+
+  window.deleteSession = async function(id) {
+    if (!confirm('Delete this session?')) return;
+    try {
+      await deleteDoc(doc(db, 'ev_sessions', id));
+      showToast('Deleted.', 'success');
+      await loadAll();
+    } catch(e) {
+      showToast('Delete failed: ' + e.message, 'error');
+    }
+  };
+
+  // ─── Load & render ─────────────────────────────────────────────────────────
+  window.loadAll = async function() {
+    try {
+      const q = query(collection(db, 'ev_sessions'), orderBy('date', 'desc'));
+      const snap = await getDocs(q);
+      const sessions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      window._sessions = sessions;
+      renderDashboard(sessions);
+      renderTable(sessions);
+      renderReports(sessions);
+    } catch(e) {
+      console.error(e);
+      showToast('Load failed: ' + e.message, 'error');
+    }
+  };
+
+  function renderDashboard(sessions) {
+    const now = new Date();
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const monthly = sessions.filter(s => s.date.startsWith(thisMonth));
+
+    const totalKwh   = sessions.reduce((a,s) => a + (s.kwh || 0), 0);
+    const totalCost  = sessions.reduce((a,s) => a + (s.cost || 0), 0);
+    const homeKwh    = sessions.filter(s=>s.method==='home').reduce((a,s)=>a+(s.kwh||0),0);
+    const outKwh     = sessions.filter(s=>s.method==='outside').reduce((a,s)=>a+(s.kwh||0),0);
+    const homeCost   = sessions.filter(s=>s.method==='home').reduce((a,s)=>a+(s.cost||0),0);
+    const outCost    = sessions.filter(s=>s.method==='outside').reduce((a,s)=>a+(s.cost||0),0);
+    const mKwh       = monthly.reduce((a,s)=>a+(s.kwh||0),0);
+    const mCost      = monthly.reduce((a,s)=>a+(s.cost||0),0);
+
+    setEl('stat_total_kwh', totalKwh.toFixed(2) + ' kWh');
+    setEl('stat_total_cost', '₹' + totalCost.toFixed(2));
+    setEl('stat_home_kwh', homeKwh.toFixed(2) + ' kWh');
+    setEl('stat_home_cost', '₹' + homeCost.toFixed(2));
+    setEl('stat_out_kwh', outKwh.toFixed(2) + ' kWh');
+    setEl('stat_out_cost', '₹' + outCost.toFixed(2));
+    setEl('stat_month_kwh', mKwh.toFixed(2) + ' kWh');
+    setEl('stat_month_cost', '₹' + mCost.toFixed(2));
+    setEl('stat_sessions', sessions.length);
+    const avg = sessions.length ? (totalCost / totalKwh).toFixed(2) : '0';
+    setEl('stat_avg_rate', '₹' + avg + '/kWh');
+  }
+
+  function renderTable(sessions) {
+    const tbody = document.getElementById('sessions_tbody');
+    if (!sessions.length) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-row">No sessions yet. Add your first charge!</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = sessions.map(s => `
+      <tr class="session-row ${s.method}">
+        <td><span class="badge ${s.method}">${s.method === 'home' ? '🏠 Home' : '⚡ Outside'}</span></td>
+        <td>${formatDate(s.date)}</td>
+        <td class="mono">${s.method==='home' ? (s.startPct+'% → '+s.endPct+'%') : '—'}</td>
+        <td class="mono">${(s.kwh||0).toFixed(3)} kWh</td>
+        <td class="mono">${s.tariff || '—'}</td>
+        <td class="mono">${s.timeStart && s.timeEnd ? s.timeStart+' – '+s.timeEnd : (s.duration||'—')}</td>
+        <td class="mono cost">₹${(s.cost||0).toFixed(2)}</td>
+        <td><button class="del-btn" onclick="deleteSession('${s.id}')">✕</button></td>
+      </tr>
+    `).join('');
+  }
+
+  function renderReports(sessions) {
+    const now = new Date();
+
+    // ── Weekly ──────────────────────────────────────────
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay());
+    const weekly = sessions.filter(s => new Date(s.date) >= weekStart);
+    buildReport('report_weekly', weekly, 'This Week');
+
+    // ── Monthly ─────────────────────────────────────────
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const monthly = sessions.filter(s => s.date.startsWith(thisMonth));
+    buildReport('report_monthly', monthly, now.toLocaleString('default',{month:'long',year:'numeric'}));
+
+    // ── Yearly ──────────────────────────────────────────
+    const thisYear = now.getFullYear().toString();
+    const yearly = sessions.filter(s => s.date.startsWith(thisYear));
+    buildReport('report_yearly', yearly, thisYear);
+
+    // ── Monthly breakdown chart ──────────────────────────
+    buildMonthlyChart(sessions);
+  }
+
+  function buildReport(containerId, sessions, label) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const home = sessions.filter(s => s.method === 'home');
+    const out  = sessions.filter(s => s.method === 'outside');
+    const sum  = (arr, key) => arr.reduce((a,s) => a + (s[key]||0), 0);
+
+    el.innerHTML = `
+      <div class="report-label">${label}</div>
+      <div class="report-grid">
+        <div class="report-card home-card">
+          <div class="rc-title">🏠 Home (KSEB)</div>
+          <div class="rc-stat">${sum(home,'kwh').toFixed(2)} <span>kWh</span></div>
+          <div class="rc-cost">₹${sum(home,'cost').toFixed(2)}</div>
+          <div class="rc-sub">${home.length} session${home.length!==1?'s':''}</div>
+        </div>
+        <div class="report-card out-card">
+          <div class="rc-title">⚡ Outside (ChargeMOD)</div>
+          <div class="rc-stat">${sum(out,'kwh').toFixed(2)} <span>kWh</span></div>
+          <div class="rc-cost">₹${sum(out,'cost').toFixed(2)}</div>
+          <div class="rc-sub">${out.length} session${out.length!==1?'s':''} · GST ₹${sum(out,'gst').toFixed(2)}</div>
+        </div>
+        <div class="report-card combined-card">
+          <div class="rc-title">⚡+🏠 Combined</div>
+          <div class="rc-stat">${sum(sessions,'kwh').toFixed(2)} <span>kWh</span></div>
+          <div class="rc-cost">₹${sum(sessions,'cost').toFixed(2)}</div>
+          <div class="rc-sub">${sessions.length} total session${sessions.length!==1?'s':''}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function buildMonthlyChart(sessions) {
+    const canvas = document.getElementById('monthly_chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const monthMap = {};
+    sessions.forEach(s => {
+      const m = s.date.substring(0,7);
+      if (!monthMap[m]) monthMap[m] = { home: 0, outside: 0 };
+      monthMap[m][s.method] = (monthMap[m][s.method] || 0) + (s.cost || 0);
+    });
+    const months = Object.keys(monthMap).sort().slice(-12);
+    const homeData = months.map(m => monthMap[m].home || 0);
+    const outData  = months.map(m => monthMap[m].outside || 0);
+
+    // Sync canvas resolution to display size
+    canvas.width = canvas.offsetWidth || 600;
+    canvas.height = canvas.offsetHeight || 200;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!months.length) {
+      ctx.fillStyle = '#aaa';
+      ctx.font = '14px DM Mono';
+      ctx.fillText('No data yet', canvas.width/2 - 40, canvas.height/2);
+      return;
+    }
+
+    const W = canvas.width, H = canvas.height;
+    const pad = { l:50, r:20, t:20, b:50 };
+    const chartW = W - pad.l - pad.r;
+    const chartH = H - pad.t - pad.b;
+    const maxVal = Math.max(...months.map(m => (monthMap[m].home||0)+(monthMap[m].outside||0)), 1);
+    const barW = chartW / months.length;
+
+    // draw bars
+    months.forEach((m, i) => {
+      const x = pad.l + i * barW + barW * 0.1;
+      const bw = barW * 0.8;
+      const hh = (homeData[i] / maxVal) * chartH;
+      const oh = (outData[i] / maxVal) * chartH;
+      // outside (bottom)
+      ctx.fillStyle = '#f97316';
+      ctx.fillRect(x, pad.t + chartH - oh, bw, oh);
+      // home (on top)
+      ctx.fillStyle = '#22c55e';
+      ctx.fillRect(x, pad.t + chartH - oh - hh, bw, hh);
+      // label
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '10px DM Mono';
+      ctx.fillText(m.substring(5), x + bw/2 - 10, H - pad.b + 16);
+    });
+
+    // Y axis labels
+    ctx.fillStyle = '#64748b';
+    ctx.font = '10px DM Mono';
+    [0, 0.25, 0.5, 0.75, 1].forEach(t => {
+      const y = pad.t + chartH * (1 - t);
+      ctx.fillText('₹' + Math.round(maxVal * t), 0, y + 4);
+    });
+  }
+
+  // ─── Helpers ───────────────────────────────────────────────────────────────
+  function setEl(id, val) { const e = document.getElementById(id); if(e) e.textContent = val; }
+  function formatDate(d) { return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', {day:'numeric',month:'short',year:'numeric'}); }
+  function showToast(msg, type='success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast ' + type + ' show';
+    setTimeout(() => t.className = 'toast', 3000);
+  }
+  function showBtn(label) { const b = document.getElementById('save_btn'); if(b) b.textContent = label; }
+  function clearForm() {
+    ['inp_start','inp_end','inp_note','inp_time_start','inp_time_end','inp_kwh_direct'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    document.getElementById('cost_preview').textContent = '';
+  }
+
+  // ─── Method toggle ─────────────────────────────────────────────────────────
+  window.toggleMethod = function() {
+    const method = document.getElementById('inp_method').value;
+    document.getElementById('kseb_note').style.display   = method === 'home'    ? 'block' : 'none';
+    document.getElementById('out_note').style.display    = method === 'outside' ? 'block' : 'none';
+    // Home: % only. Outside: kWh + times
+    document.getElementById('row_pct').style.display     = method === 'home'    ? 'flex'  : 'none';
+    document.getElementById('row_outside').style.display = method === 'outside' ? 'block' : 'none';
+    // Clear time fields when switching to home
+    if (method === 'home') {
+      const ts = document.getElementById('inp_time_start');
+      const te = document.getElementById('inp_time_end');
+      if (ts) ts.value = '';
+      if (te) te.value = '';
+    }
+    previewCost();
+  };
+
+  // ─── Settings ──────────────────────────────────────────────────────────────
+  window.saveBattery = function() {
+    const v = parseFloat(document.getElementById('battery_cap').value);
+    if (isNaN(v) || v < 1) { showToast('Invalid capacity', 'error'); return; }
+    localStorage.setItem('ev_battery_capacity', v);
+    showToast(`Battery capacity set to ${v} kWh ✓`, 'success');
+    updateCapDisplay();
+  };
+
+  function updateCapDisplay() {
+    const cap = getCarCapacity();
+    const el = document.getElementById('cap_display');
+    if (el) el.textContent = cap + ' kWh';
+    // Also show saved charger speed if available
+    const spd = localStorage.getItem('ev_charger_speed_kw');
+    const spdEl = document.getElementById('charger_speed_saved');
+    const spdVal = document.getElementById('saved_speed_val');
+    if (spd && spdEl && spdVal) {
+      spdEl.style.display = 'block';
+      spdVal.textContent = spd;
+    }
+  }
+
+  // ─── Calibration from known ChargeMOD session ──────────────────────────────
+  window._calibratedCap = null;
+
+  window.runCalibration = function() {
+    const start = parseFloat(document.getElementById('cal_start').value);
+    const end   = parseFloat(document.getElementById('cal_end').value);
+    const kwh   = parseFloat(document.getElementById('cal_kwh').value);
+    const resEl = document.getElementById('cal_result');
+
+    if (isNaN(start) || isNaN(end) || isNaN(kwh) || end <= start || kwh <= 0) {
+      resEl.style.display = 'none';
+      return;
+    }
+    const pctDiff = end - start;
+    const capacity = kwh / (pctDiff / 100);
+    window._calibratedCap = parseFloat(capacity.toFixed(2));
+
+    document.getElementById('cal_result_val').textContent = window._calibratedCap + ' kWh';
+    document.getElementById('cal_result_sub').textContent =
+      `Based on ${pctDiff}% change = ${kwh} kWh → full battery ≈ ${window._calibratedCap} kWh`;
+    resEl.style.display = 'block';
+  };
+
+  window.applyCalibration = function() {
+    if (!window._calibratedCap) return;
+    localStorage.setItem('ev_battery_capacity', window._calibratedCap);
+    const capEl = document.getElementById('battery_cap');
+    if (capEl) capEl.value = window._calibratedCap;
+    showToast(`Calibrated! Battery set to ${window._calibratedCap} kWh ✓`, 'success');
+    updateCapDisplay();
+  };
+
+  // ─── Home charging calibrator ────────────────────────────────────────────────
+  window.runEstimator = function() {
+    const start      = parseFloat(document.getElementById('est_start').value);
+    const end        = parseFloat(document.getElementById('est_end').value);
+    const timeStart  = document.getElementById('est_time_start').value;
+    const timeEnd    = document.getElementById('est_time_end').value;
+    const actualKwh  = parseFloat(document.getElementById('est_actual_kwh').value);
+    const resEl      = document.getElementById('est_result');
+
+    if (isNaN(start) || isNaN(end) || end <= start || !timeStart || !timeEnd) {
+      resEl.style.display = 'none';
+      return;
+    }
+
+    // Duration
+    const [sh, sm] = timeStart.split(':').map(Number);
+    const [eh, em] = timeEnd.split(':').map(Number);
+    let diffMins = (eh * 60 + em) - (sh * 60 + sm);
+    if (diffMins <= 0) diffMins += 24 * 60;
+    const diffH = Math.floor(diffMins / 60);
+    const diffM = diffMins % 60;
+    const durationStr = diffH > 0 ? `${diffH}h ${diffM}m` : `${diffM}m`;
+    const hours = diffMins / 60;
+
+    // Use actual kWh if entered, else estimate from saved battery capacity
+    const hasActual = !isNaN(actualKwh) && actualKwh > 0;
+    const kwh       = hasActual ? actualKwh : parseFloat(((end - start) / 100 * getCarCapacity()).toFixed(3));
+    const speedKw   = parseFloat((kwh / hours).toFixed(3));
+
+    // If actual kWh given, back-calculate real battery capacity
+    const pctDiff = end - start;
+    const backCalcCap = hasActual ? parseFloat((actualKwh / (pctDiff / 100)).toFixed(2)) : null;
+
+    window._lastCalcSpeed   = speedKw;
+    window._lastActualKwh   = kwh;
+    window._lastSessionData = { start, end, timeStart, timeEnd, kwh, durationStr };
+    window._backCalcCap     = backCalcCap;
+
+    document.getElementById('est_duration').textContent  = durationStr;
+    document.getElementById('est_kwh').textContent       = kwh.toFixed(3) + ' kWh' + (hasActual ? '' : ' (est.)');
+    document.getElementById('est_speed_out').textContent = speedKw + ' kW';
+    document.getElementById('est_cost_home').textContent = '₹' + ksebCost(kwh).toFixed(2);
+
+    // Show back-calculated capacity hint
+    const capHintEl = document.getElementById('est_cap_hint');
+    if (capHintEl) {
+      if (backCalcCap) {
+        capHintEl.textContent = `💡 Actual kWh entered → your real battery capacity is ~${backCalcCap} kWh. Hit "Save Charger Speed" to also update battery capacity.`;
+        capHintEl.style.display = 'block';
+      } else {
+        capHintEl.style.display = 'none';
+      }
+    }
+
+    resEl.style.display = 'block';
+  };
+
+  // Save charger speed (and optionally back-calculated capacity) from calibration
+  window.saveChargerSpeed = function() {
+    const speed = window._lastCalcSpeed;
+    if (!speed) { showToast('Run the calibration first.', 'error'); return; }
+    localStorage.setItem('ev_charger_speed_kw', speed);
+
+    // If we have a back-calculated capacity from actual kWh, save that too
+    if (window._backCalcCap) {
+      localStorage.setItem('ev_battery_capacity', window._backCalcCap);
+      const capEl = document.getElementById('battery_cap');
+      if (capEl) capEl.value = window._backCalcCap;
+      showToast(`Saved! Speed: ${speed} kW · Battery: ${window._backCalcCap} kWh ✓`, 'success');
+    } else {
+      showToast(`Charger speed saved: ${speed} kW ✓`, 'success');
+    }
+
+    document.getElementById('charger_speed_saved').style.display = 'block';
+    document.getElementById('saved_speed_val').textContent = speed;
+    updateCapDisplay();
+  };
+
+  // Log the calibrated session directly as a home session
+  window.logFromEstimator = async function() {
+    const start     = parseFloat(document.getElementById('est_start').value);
+    const end       = parseFloat(document.getElementById('est_end').value);
+    const timeStart = document.getElementById('est_time_start').value;
+    const timeEnd   = document.getElementById('est_time_end').value;
+
+    if (isNaN(start) || isNaN(end) || end <= start || !timeStart || !timeEnd) {
+      showToast('Fill in all fields first.', 'error'); return;
+    }
+
+    // Use actual kWh if entered, else estimate from capacity
+    const actualKwh = parseFloat(document.getElementById('est_actual_kwh').value);
+    const hasActual = !isNaN(actualKwh) && actualKwh > 0;
+    const cap  = getCarCapacity();
+    const kwh  = hasActual ? actualKwh : parseFloat(((end - start) / 100 * cap).toFixed(3));
+    const amt  = ksebCost(kwh);
+
+    const [sh, sm] = timeStart.split(':').map(Number);
+    const [eh, em] = timeEnd.split(':').map(Number);
+    let diffMins = (eh * 60 + em) - (sh * 60 + sm);
+    if (diffMins <= 0) diffMins += 24 * 60;
+    const duration = `${Math.floor(diffMins/60)}h ${diffMins%60}m`;
+
+    const session = {
+      method: 'home',
+      date: new Date().toISOString().split('T')[0],
+      startPct: start, endPct: end, kwh,
+      cost: amt, energy: amt, service: 0, gst: 0,
+      tariff: 'KSEB',
+      duration, timeStart, timeEnd,
+      note: 'Logged from calibrator',
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      showToast('Saving...', 'success');
+      await addDoc(collection(db, 'ev_sessions'), session);
+      showToast('Home session logged! ✓', 'success');
+      // Clear fields
+      ['est_start','est_end','est_time_start','est_time_end','est_actual_kwh'].forEach(id => {
+        document.getElementById(id).value = '';
+      });
+      document.getElementById('est_result').style.display = 'none';
+      await loadAll();
+    } catch(e) {
+      showToast('Save failed: ' + e.message, 'error');
+    }
+  };
+
+  const TAB_ORDER = ['dashboard', 'add', 'sessions', 'reports', 'settings'];
+
+  window.switchTab = function(tab) {
+    const idx = TAB_ORDER.indexOf(tab);
+    if (idx === -1) return;
+
+    // Highlight top tabs (desktop)
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    const topBtn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+    if (topBtn) topBtn.classList.add('active');
+
+    // Highlight bottom nav (mobile)
+    document.querySelectorAll('.bottom-nav .nav-item').forEach(b => b.classList.remove('active'));
+    const botBtn = document.querySelector(`.bottom-nav .nav-item[data-tab="${tab}"]`);
+    if (botBtn) botBtn.classList.add('active');
+
+    // Active class — used by desktop CSS (opacity 0/1) and for reference
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab_' + tab).classList.add('active');
+
+    // Slide (all screen sizes — desktop CSS overrides transform to none)
+    const slider = document.getElementById('tabs_slider');
+    if (slider) slider.style.transform = `translateX(calc(-${idx} * 100vw))`;
+
+    window._currentTabIdx = idx;
+
+    // Scroll to top of new pane
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // ─── Swipe gesture ─────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    window._currentTabIdx = 0;
+    const viewport = document.querySelector('.tabs-viewport');
+    if (!viewport) return;
+
+    let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+    let isDragging = false;
+
+    viewport.addEventListener('touchstart', e => {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      touchStartTime = Date.now();
+      isDragging = false;
+    }, { passive: true });
+
+    viewport.addEventListener('touchmove', e => {
+      const dx = e.touches[0].clientX - touchStartX;
+      const dy = e.touches[0].clientY - touchStartY;
+      // Only hijack horizontal swipes (dx dominant)
+      if (!isDragging && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
+        isDragging = true;
+      }
+    }, { passive: true });
+
+    viewport.addEventListener('touchend', e => {
+      if (!isDragging) return;
+      const dx = e.changedTouches[0].clientX - touchStartX;
+      const dt = Date.now() - touchStartTime;
+      const isFlick = Math.abs(dx) > 40 || (Math.abs(dx) > 20 && dt < 250);
+      if (!isFlick) return;
+
+      const cur = window._currentTabIdx || 0;
+      if (dx < 0 && cur < TAB_ORDER.length - 1) {
+        // swipe left → next tab
+        switchTab(TAB_ORDER[cur + 1]);
+      } else if (dx > 0 && cur > 0) {
+        // swipe right → prev tab
+        switchTab(TAB_ORDER[cur - 1]);
+      }
+      isDragging = false;
+    }, { passive: true });
+  });
+
+  // ─── Preview cost live ─────────────────────────────────────────────────────
+  window.previewCost = function() {
+    const method  = document.getElementById('inp_method').value;
+    const previewEl = document.getElementById('cost_preview');
+    const kwh = getKwh();
+    if (!kwh || kwh <= 0) { previewEl.textContent = ''; return; }
+
+    let txt = '';
+    if (method === 'home') {
+      txt = `${kwh.toFixed(3)} kWh → ₹${ksebCost(kwh).toFixed(2)} (KSEB slab rate)`;
+    } else {
+      const c = chargemodCost(kwh);
+      txt = `${kwh.toFixed(3)} kWh → Service ₹${c.service.toFixed(2)} + GST ₹${c.gst.toFixed(2)} = ₹${c.total.toFixed(2)}`;
+    }
+    previewEl.textContent = '≈ ' + txt;
+  };
+
+  // ─── Boot ──────────────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', async () => {
+    const cap = localStorage.getItem('ev_battery_capacity') || '3.07';
+    const capEl = document.getElementById('battery_cap');
+    if (capEl) capEl.value = cap;
+    updateCapDisplay();
+    document.getElementById('inp_date').value = new Date().toISOString().split('T')[0];
+    toggleMethod();
+    await loadAll();
+  });
+
+  // ─── PWA Install prompt ────────────────────────────────────────────────────
+  let _installPrompt = null;
+
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    _installPrompt = e;
+    const banner = document.getElementById('install_banner');
+    if (banner) banner.style.display = 'flex';
+  });
+
+  window.installApp = async function() {
+    if (_installPrompt) {
+      _installPrompt.prompt();
+      const { outcome } = await _installPrompt.userChoice;
+      if (outcome === 'accepted') {
+        document.getElementById('install_banner').style.display = 'none';
+        showToast('App installed! ⚡', 'success');
+      }
+      _installPrompt = null;
+    }
+  };
+
+  window.addEventListener('appinstalled', () => {
+    document.getElementById('install_banner').style.display = 'none';
+    showToast('EV Tracker installed ✓', 'success');
+  });
+</script>
+
+<style>
+  :root {
+    --bg: #0a0f1e;
+    --bg2: #111827;
+    --bg3: #1e2a3a;
+    --border: #1e3a5f;
+    --accent: #00e5ff;
+    --accent2: #f97316;
+    --green: #22c55e;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --home: #22c55e;
+    --out: #f97316;
+    --card-shadow: 0 4px 24px rgba(0,229,255,0.07);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    background-image: radial-gradient(ellipse at 20% 10%, rgba(0,229,255,0.04) 0%, transparent 60%),
+                      radial-gradient(ellipse at 80% 80%, rgba(249,115,22,0.04) 0%, transparent 60%);
+  }
+
+  /* ─── Header ─────────────────────────────────── */
+  .header {
+    padding: 32px 24px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .header-left { display: flex; align-items: baseline; gap: 16px; }
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.7rem;
+    font-weight: 800;
+    letter-spacing: -1px;
+    color: var(--accent);
+  }
+  .logo span { color: var(--accent2); }
+  .header-sub {
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .user-pill {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    padding: 6px 16px;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .user-pill strong { color: var(--accent); }
+
+  /* ─── Tabs ──────────────────────────────────── */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 16px 24px 0;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 10px 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ─── Tab content ───────────────────────────── */
+  .tab-pane { display: none; padding: 28px 24px; }
+  .tab-pane.active { display: block; }
+
+  /* ─── Stat cards ────────────────────────────── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .stat-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s;
+  }
+  .stat-card:hover { transform: translateY(-2px); }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+  }
+  .stat-card.home-type::before { background: var(--home); }
+  .stat-card.out-type::before  { background: var(--out); }
+  .stat-card.month-type::before { background: linear-gradient(90deg,var(--accent),var(--out)); }
+
+  .stat-label { font-size: 0.65rem; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px; }
+  .stat-val   { font-size: 1.5rem; font-weight: 500; color: var(--text); line-height: 1; }
+  .stat-sub   { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
+
+  /* ─── Form ──────────────────────────────────── */
+  .form-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 28px;
+    max-width: 620px;
+  }
+  .form-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .form-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-width: 120px;
+  }
+  .form-group label {
+    font-size: 0.65rem;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .form-group input,
+  .form-group select {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.9rem;
+    padding: 10px 14px;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+  }
+  .form-group input:focus,
+  .form-group select:focus { border-color: var(--accent); }
+
+  .toggle-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .method-btn {
+    flex: 1;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg3);
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+  .method-btn.active-home { border-color: var(--home); color: var(--home); background: rgba(34,197,94,0.08); }
+  .method-btn.active-out  { border-color: var(--out);  color: var(--out);  background: rgba(249,115,22,0.08); }
+
+  .kseb-note {
+    background: rgba(34,197,94,0.07);
+    border: 1px solid rgba(34,197,94,0.2);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.72rem;
+    color: #86efac;
+    line-height: 1.6;
+    margin-bottom: 16px;
+  }
+
+  .cost-preview {
+    font-size: 0.85rem;
+    color: var(--accent);
+    min-height: 20px;
+    margin-bottom: 20px;
+    font-weight: 500;
+  }
+
+  .save-btn {
+    background: var(--accent);
+    color: #0a0f1e;
+    border: none;
+    border-radius: 10px;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 14px 32px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .save-btn:hover { opacity: 0.85; transform: translateY(-1px); }
+
+  /* ─── Sessions table ────────────────────────── */
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    margin-top: 32px;
+  }
+  .table-wrap {
+    overflow-x: auto;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+  thead th {
+    background: var(--bg3);
+    color: var(--muted);
+    font-size: 0.62rem;
+    font-weight: 400;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr { border-bottom: 1px solid rgba(30,58,95,0.4); transition: background 0.15s; }
+  tbody tr:hover { background: var(--bg3); }
+  tbody td { padding: 12px 16px; }
+  .mono { font-family: 'DM Mono', monospace; }
+  .cost { color: var(--accent); font-weight: 500; }
+  .empty-row { text-align: center; color: var(--muted); padding: 40px !important; }
+
+  .badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 100px;
+    letter-spacing: 0.5px;
+  }
+  .badge.home    { background: rgba(34,197,94,0.15);  color: var(--home); border: 1px solid rgba(34,197,94,0.3); }
+  .badge.outside { background: rgba(249,115,22,0.15); color: var(--out);  border: 1px solid rgba(249,115,22,0.3); }
+
+  .del-btn {
+    background: transparent;
+    border: 1px solid rgba(239,68,68,0.3);
+    color: #ef4444;
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 0.7rem;
+    transition: all 0.15s;
+  }
+  .del-btn:hover { background: rgba(239,68,68,0.1); }
+
+  /* ─── Reports ───────────────────────────────── */
+  .report-section { margin-bottom: 40px; }
+  .report-label {
+    font-family: 'Instrument Serif', serif;
+    font-size: 1.3rem;
+    color: var(--text);
+    margin-bottom: 16px;
+    font-style: italic;
+  }
+  .report-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  .report-card {
+    background: var(--bg2);
+    border-radius: 16px;
+    padding: 22px;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .report-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .home-card::after     { background: var(--home); }
+  .out-card::after      { background: var(--out); }
+  .combined-card::after { background: linear-gradient(90deg, var(--home), var(--out)); }
+
+  .rc-title { font-size: 0.65rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; }
+  .rc-stat  { font-size: 1.6rem; font-weight: 500; color: var(--text); }
+  .rc-stat span { font-size: 0.75rem; color: var(--muted); }
+  .rc-cost  { font-size: 1.1rem; color: var(--accent); margin-top: 6px; font-weight: 500; }
+  .rc-sub   { font-size: 0.65rem; color: var(--muted); margin-top: 6px; }
+
+  /* ─── Chart ─────────────────────────────────── */
+  .chart-wrap {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-top: 32px;
+  }
+  .chart-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+  canvas { width: 100%; height: 220px; }
+
+  /* ─── Settings ──────────────────────────────── */
+  .settings-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    max-width: 480px;
+    margin-bottom: 24px;
+  }
+  .settings-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .settings-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .settings-row .form-group { max-width: 200px; }
+  .settings-save-btn {
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 8px;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    height: 42px;
+  }
+  .settings-save-btn:hover { background: var(--accent); color: #0a0f1e; }
+
+  .kseb-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    margin-top: 12px;
+  }
+  .kseb-table th {
+    color: var(--muted);
+    font-size: 0.62rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .kseb-table td { padding: 8px 12px; border-bottom: 1px solid rgba(30,58,95,0.3); }
+  .kseb-table td:last-child { color: var(--accent); }
+
+  .settings-hint {
+    font-size: 0.72rem;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  /* ─── Calibration result box ─── */
+  .cal-result {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    margin-top: 16px;
+  }
+  .cal-result-label {
+    font-size: 0.62rem;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .cal-result-val {
+    font-size: 2rem;
+    font-weight: 500;
+    color: var(--accent);
+    font-family: 'Syne', sans-serif;
+    line-height: 1;
+  }
+  .cal-result-sub {
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-top: 8px;
+    line-height: 1.6;
+  }
+
+  /* ─── Estimator result grid ─── */
+  .est-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .est-item {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+  }
+  .est-label {
+    font-size: 0.6rem;
+    color: var(--muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .est-val {
+    font-size: 1.2rem;
+    font-weight: 500;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+  }
+  @media (max-width: 600px) {
+    .est-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .est-val { font-size: 1rem; }
+  }
+
+  /* ─── Toast ─────────────────────────────────── */
+  .toast {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 20px;
+    font-size: 0.8rem;
+    color: var(--text);
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.3s;
+    z-index: 999;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { border-color: var(--home); }
+  .toast.error   { border-color: #ef4444; color: #fca5a5; }
+
+  @media (max-width: 600px) {
+    .form-row { flex-direction: column; }
+    .header { flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; }
+    .header-sub { display: none; }
+    .user-pill { font-size: 0.7rem; padding: 4px 12px; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .stat-card { padding: 14px; }
+    .stat-val { font-size: 1.15rem; }
+    .report-grid { grid-template-columns: 1fr; }
+    .form-card { padding: 18px; border-radius: 12px; }
+    .chart-wrap { padding: 16px; }
+    canvas { height: 180px !important; }
+    .table-wrap { font-size: 0.72rem; }
+    tbody td, thead th { padding: 8px 10px; }
+    /* Hide top tabs on mobile */
+    .tabs { display: none; }
+  }
+
+  /* ─── Mobile Bottom Nav ───────────────────────── */
+  .bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(10,15,30,0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid var(--border);
+    padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+    z-index: 100;
+    justify-content: space-around;
+    align-items: center;
+  }
+  .bottom-nav .nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 12px;
+    transition: all 0.2s;
+    min-width: 52px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+  }
+  .bottom-nav .nav-item.active { color: var(--accent); }
+  .bottom-nav .nav-item .nav-icon {
+    font-size: 1.35rem;
+    line-height: 1;
+    transition: transform 0.2s;
+  }
+  .bottom-nav .nav-item.active .nav-icon { transform: scale(1.15); }
+  .bottom-nav .nav-item .nav-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.55rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  /* Active indicator dot */
+  .bottom-nav .nav-item::after {
+    content: '';
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity 0.2s;
+    margin-top: 1px;
+  }
+  .bottom-nav .nav-item.active::after { opacity: 1; }
+
+  @media (max-width: 600px) {
+    .bottom-nav { display: flex; }
+  }
+
+  /* ─── Swipe / slide transition ────────────────── */
+  /* Both desktop and mobile share this — JS controls what's visible */
+  .tabs-viewport {
+    overflow: hidden;
+    position: relative;
+    width: 100%;
+  }
+  .tabs-slider {
+    display: flex;
+    transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+    align-items: flex-start;
+  }
+  /* Each pane always rendered — JS slides to the right one */
+  .tab-pane {
+    display: block !important;
+    flex-shrink: 0;
+    width: 100vw;
+    max-width: 100vw;
+    box-sizing: border-box;
+    padding-bottom: 90px;
+  }
+  /* Desktop: constrain viewport width so overflow is hidden properly */
+  @media (min-width: 601px) {
+    .tabs-viewport { overflow: visible; }
+    .tabs-slider { overflow: visible; }
+    /* Hide all panes on desktop except active — use opacity trick so layout isn't broken */
+    .tab-pane {
+      width: 100% !important;
+      max-width: 100% !important;
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+      transform: none !important;
+    }
+    .tab-pane.active {
+      position: relative;
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .tabs-slider {
+      position: relative;
+      transform: none !important;
+    }
+  }
+</style>
 </head>
 <body>
 
-<div id="toast">Message</div>
-
-<!-- COMPARISON MODAL -->
-<div id="comparison-modal" class="modal-overlay hidden">
-    <div class="card" style="width: 90%; max-width: 400px; text-align: center; position: relative;">
-        <h2 style="margin-bottom: 20px;">Head-to-Head</h2>
-        
-        <div class="grid-2">
-            <div>
-                <div id="comp-me-avatar" style="font-size: 2.5rem; margin-bottom: 5px;">👤</div>
-                <h3 id="comp-me-name">Me</h3>
-                <div class="metric-highlight" style="font-size: 2rem;" id="comp-me-score">0</div>
-            </div>
-            <div>
-                <div id="comp-friend-avatar" style="font-size: 2.5rem; margin-bottom: 5px;">👤</div>
-                <h3 id="comp-friend-name">Friend</h3>
-                <div class="metric-highlight" style="font-size: 2rem; color: var(--secondary);" id="comp-friend-score">0</div>
-            </div>
-        </div>
-
-        <div class="vs-bar">
-            <div id="vs-bar-me" class="vs-fill-me" style="width: 50%;"></div>
-            <div id="vs-bar-friend" class="vs-fill-friend" style="width: 50%;"></div>
-        </div>
-
-        <p id="comp-message" style="margin: 20px 0; font-weight: bold; font-size: 1.1rem; color: var(--warning);"></p>
-        
-        <button class="secondary" onclick="closeComparison()">Close</button>
-    </div>
+<div class="header">
+  <div class="header-left">
+    <div class="logo">EV<span>⚡</span>Track</div>
+    <div class="header-sub">Kerala EV Charge Monitor</div>
+  </div>
+  <div class="user-pill">Charging as <strong>Arjun V K</strong></div>
 </div>
 
-<div id="app-container">
+<div class="tabs">
+  <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
+  <button class="tab-btn" data-tab="add" onclick="switchTab('add')">+ Add Session</button>
+  <button class="tab-btn" data-tab="sessions" onclick="switchTab('sessions')">All Sessions</button>
+  <button class="tab-btn" data-tab="reports" onclick="switchTab('reports')">Reports</button>
+  <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
+</div>
 
-    <!-- AUTHENTICATION VIEW -->
-    <div id="view-auth" class="view-section active">
-        <h1 style="text-align: center; margin-top: 40px; color: var(--primary);">Vitality</h1>
-        <p style="text-align: center;">Your intelligent human tracking dashboard.</p>
-        
-        <div class="card" style="margin-top: 30px;">
-            <h2 id="auth-title">Login</h2>
-            <input type="email" id="auth-email" placeholder="Email">
-            <input type="password" id="auth-password" placeholder="Password">
-            
-            <!-- Signup Only Fields -->
-            <div id="signup-fields" class="hidden">
-                <input type="text" id="auth-username" placeholder="Username">
-                <select id="auth-gender">
-                    <option value="" disabled selected>Select Gender</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                </select>
-                <div class="grid-2">
-                    <input type="number" id="auth-age" placeholder="Age (Yrs)">
-                    <input type="number" id="auth-height" placeholder="Height (cm)">
-                </div>
-                <input type="number" id="auth-weight" placeholder="Weight (kg)">
-            </div>
+<div class="tabs-viewport">
+<div class="tabs-slider" id="tabs_slider">
 
-            <button id="btn-action" onclick="handleAuth()">Login</button>
-            <p style="text-align: center; cursor: pointer; color: var(--primary); margin-top: 15px;" onclick="toggleAuthMode()">
-                <span id="auth-toggle-text">Need an account? Sign up</span>
-            </p>
-        </div>
+<!-- ═══════════ DASHBOARD ═══════════ -->
+<div id="tab_dashboard" class="tab-pane active">
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total kWh Charged</div>
+      <div class="stat-val" id="stat_total_kwh">—</div>
+      <div class="stat-sub">All time</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Spend</div>
+      <div class="stat-val" id="stat_total_cost">—</div>
+      <div class="stat-sub">All time</div>
+    </div>
+    <div class="stat-card home-type">
+      <div class="stat-label">🏠 Home (KSEB)</div>
+      <div class="stat-val" id="stat_home_kwh">—</div>
+      <div class="stat-sub" id="stat_home_cost">—</div>
+    </div>
+    <div class="stat-card out-type">
+      <div class="stat-label">⚡ Outside (ChargeMOD)</div>
+      <div class="stat-val" id="stat_out_kwh">—</div>
+      <div class="stat-sub" id="stat_out_cost">—</div>
+    </div>
+    <div class="stat-card month-type">
+      <div class="stat-label">This Month — kWh</div>
+      <div class="stat-val" id="stat_month_kwh">—</div>
+      <div class="stat-sub" id="stat_month_cost">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Sessions</div>
+      <div class="stat-val" id="stat_sessions">—</div>
+      <div class="stat-sub">All time</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Cost / kWh</div>
+      <div class="stat-val" id="stat_avg_rate">—</div>
+      <div class="stat-sub">Blended rate</div>
+    </div>
+  </div>
+
+  <div class="chart-wrap">
+    <div class="chart-title">
+      Monthly Spend
+      <span class="legend-item"><span class="legend-dot" style="background:var(--home)"></span>Home</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--out)"></span>Outside</span>
+    </div>
+    <canvas id="monthly_chart" height="200" style="width:100%;height:200px;display:block;"></canvas>
+  </div>
+</div>
+
+<!-- ═══════════ ADD SESSION ═══════════ -->
+<div id="tab_add" class="tab-pane">
+  <div class="form-card">
+    <div class="form-title">⚡ Log Charging Session</div>
+
+    <div class="toggle-row">
+      <button class="method-btn active-home" id="btn_home" onclick="
+        document.getElementById('inp_method').value='home';
+        this.className='method-btn active-home';
+        document.getElementById('btn_out').className='method-btn';
+        toggleMethod(); previewCost();
+      ">🏠 Home (KSEB)</button>
+      <button class="method-btn" id="btn_out" onclick="
+        document.getElementById('inp_method').value='outside';
+        this.className='method-btn active-out';
+        document.getElementById('btn_home').className='method-btn';
+        toggleMethod(); previewCost();
+      ">⚡ Outside (ChargeMOD)</button>
     </div>
 
-    <!-- DASHBOARD VIEW -->
-    <div id="view-dashboard" class="view-section">
-        <div class="flex-between" style="align-items: flex-start; margin-bottom: 15px;">
-            <h2>Dashboard</h2>
-            <div style="text-align: right;">
-                <div class="badge" style="background: var(--primary-variant); color: #fff; margin-bottom: 5px;">
-                    🏆 Score: <span id="my-score-display">0</span>
-                </div>
-                <div id="bmi-display" class="badge" style="display: block;">BMI: --</div>
-            </div>
-        </div>
-        
-        <!-- Targets Card -->
-        <div class="card">
-            <h3>Daily Targets</h3>
-            <p style="margin-bottom: 5px;">Based on your biometrics:</p>
-            <div class="grid-2">
-                <div style="background: var(--surface-light); padding: 10px; border-radius: 8px;">
-                    <div style="font-size: 0.8rem; color: var(--text-muted)">Calorie Goal</div>
-                    <div class="metric-highlight"><span id="target-cals">--</span> kcal</div>
-                </div>
-                <div style="background: var(--surface-light); padding: 10px; border-radius: 8px;">
-                    <div style="font-size: 0.8rem; color: var(--text-muted)">Water Goal</div>
-                    <div class="metric-highlight"><span id="target-water">--</span> ml</div>
-                </div>
-            </div>
-        </div>
+    <input type="hidden" id="inp_method" value="home">
 
-        <!-- Water Tracker -->
-        <div class="card">
-            <div class="flex-between">
-                <h3>💧 Water Intake</h3>
-                <span class="metric-highlight"><span id="water-current">0</span> ml</span>
-            </div>
-            <div class="progress-bar"><div id="water-progress" class="progress-fill" style="width: 0%;"></div></div>
-            <p style="text-align: right; font-size: 0.8rem; margin-top: 4px;">Target: <span id="water-target-display">--</span> ml</p>
-            
-            <div class="flex-row" style="margin-top: 10px;">
-                <input type="number" id="water-input" placeholder="Amount (ml)" style="margin-bottom: 0;">
-                <button class="small" onclick="addWater()">Add</button>
-            </div>
-            <div class="flex-row" style="margin-top: 10px;">
-                <button class="secondary small" style="flex: 1;" onclick="addWaterFast(250)">+250ml</button>
-                <button class="secondary small" style="flex: 1;" onclick="addWaterFast(500)">+500ml</button>
-            </div>
-        </div>
-
-        <!-- Calorie Tracker -->
-        <div class="card">
-            <div class="flex-between">
-                <h3>🔥 Calories Consumed</h3>
-                <span class="metric-highlight"><span id="cals-current">0</span> kcal</span>
-            </div>
-            <div class="progress-bar"><div id="cals-progress" class="progress-fill" style="width: 0%;"></div></div>
-            <p style="text-align: right; font-size: 0.8rem; margin-top: 4px;">Target: <span id="cals-target-display">--</span> kcal</p>
-
-            <div class="flex-row" style="margin-top: 10px;">
-                <input type="number" id="cals-input" placeholder="Kcal Consumed" style="margin-bottom: 0;">
-                <button class="small" onclick="addCalories()">Log</button>
-            </div>
-        </div>
-
-        <!-- Weight Updater -->
-        <div class="card">
-            <h3>⚖️ Update Weight</h3>
-            <p>Current logged weight: <span id="current-weight-display" class="metric-highlight">--</span> kg</p>
-            <div class="flex-row">
-                <input type="number" id="weight-input" placeholder="New Weight (kg)" style="margin-bottom: 0;">
-                <button class="small" onclick="updateWeight()">Update</button>
-            </div>
-        </div>
-
-        <!-- Today's Workouts -->
-        <div class="card">
-            <h3>🏋️ Today's Workouts</h3>
-            <div id="today-workouts-list">
-                <p>No workouts logged today.</p>
-            </div>
-        </div>
-
-        <!-- Conditional Female View -->
-        <div id="cycle-tracker" class="card hidden">
-            <h3 style="color: #ff80ab;">🌸 Cycle Tracker</h3>
-            <div id="cycle-status" style="margin-bottom: 10px;">
-                <p>No cycle data logged yet.</p>
-            </div>
-            <p>Log start of a new cycle:</p>
-            <div class="flex-row">
-                <input type="date" id="cycle-date" style="margin-bottom: 0;">
-                <button class="secondary small" onclick="logCycleStart()">Log Day 1</button>
-            </div>
-        </div>
+    <div class="kseb-note" id="kseb_note">
+      KSEB domestic slab tariff — 0–50 units: ₹3.25 | 51–100: ₹4.00 | 101–200: ₹5.25 | 200+: ₹6.85 per unit
+    </div>
+    <div class="kseb-note" id="out_note" style="display:none;background:rgba(249,115,22,0.07);border-color:rgba(249,115,22,0.2);color:#fdba74;">
+      ChargeMOD: ₹9.00/kWh service + 18% GST = <strong>₹10.62/kWh effective</strong><br>
+      Verified from invoice: 1.845 kWh → ₹16.60 service + ₹2.99 GST = ₹19.59 ✓
     </div>
 
-    <!-- ADD/EDIT WORKOUT VIEW -->
-    <div id="view-workout" class="view-section">
-        <h2 id="workout-view-title">Add Workout</h2>
-        <div class="card">
-            <select id="workout-type" onchange="toggleWorkoutFields()">
-                <option value="strength">Strength Training</option>
-                <option value="cardio">Cardio</option>
-            </select>
-
-            <p>Select from database or add new:</p>
-            <input type="text" id="workout-name" list="global-workouts" placeholder="e.g., Bench Press or Running">
-            <datalist id="global-workouts"></datalist>
-
-            <div id="strength-fields">
-                <div class="grid-2">
-                    <input type="number" id="workout-weight" placeholder="Weight (kg)">
-                    <input type="number" id="workout-reps" placeholder="Reps">
-                </div>
-            </div>
-
-            <div id="cardio-fields" class="hidden">
-                <div class="grid-2">
-                    <input type="number" id="workout-time" placeholder="Time (mins)">
-                    <input type="number" id="workout-dist" placeholder="Distance (km)">
-                </div>
-            </div>
-
-            <button id="btn-save-workout" onclick="saveWorkout()">Save Workout</button>
-            <button id="btn-cancel-edit" class="secondary hidden" style="margin-top: 10px;" onclick="cancelEditWorkout()">Cancel Edit</button>
-        </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Date</label>
+        <input type="date" id="inp_date">
+      </div>
     </div>
 
-    <!-- SOCIAL VIEW -->
-    <div id="view-social" class="view-section">
-        <h2>Social Central</h2>
-        
-        <!-- Inbox / Requests -->
-        <div class="card" id="requests-card" style="display: none;">
-            <h3 style="color: var(--warning);">📥 Inbox: Friend Requests</h3>
-            <div id="friend-requests-list"></div>
-        </div>
-
-        <!-- Global Leaderboard -->
-        <div class="card">
-            <h3>🌍 Global Top 2</h3>
-            <div id="global-leaderboard-list">
-                <p style="font-size: 0.9rem; color: var(--text-muted);">Loading global leaders...</p>
-            </div>
-        </div>
-
-        <!-- Friends List -->
-        <div class="card">
-            <h3>🏆 Friends Leaderboard</h3>
-            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 10px;">Top 3 are awarded medals! Tap a friend to go Head-to-Head.</p>
-            <div id="my-friends-list">
-                <p style="font-size: 0.9rem; color: var(--text-muted);">No friends yet. Add someone below!</p>
-            </div>
-        </div>
-
-        <!-- Search -->
-        <div class="card">
-            <h3>🔍 Find Friends</h3>
-            <div class="flex-row">
-                <input type="text" id="search-user-input" placeholder="Search username..." style="margin-bottom: 0;">
-                <button class="small" onclick="searchUsers()">Search</button>
-            </div>
-            <div id="search-user-results" style="margin-top: 10px;"></div>
-        </div>
+    <!-- HOME: % inputs only, no time needed -->
+    <div class="form-row" id="row_pct">
+      <div class="form-group">
+        <label>Start Battery %</label>
+        <input type="number" id="inp_start" min="0" max="100" placeholder="e.g. 20" oninput="previewCost()">
+      </div>
+      <div class="form-group">
+        <label>End Battery %</label>
+        <input type="number" id="inp_end" min="0" max="100" placeholder="e.g. 80" oninput="previewCost()">
+      </div>
     </div>
 
-    <!-- PROFILE VIEW -->
-    <div id="view-profile" class="view-section">
-        <h2>Profile Settings</h2>
-        <div class="card" style="text-align: center;">
-            <div id="user-avatar" style="width: 100px; height: 100px; border-radius: 50%; background-color: var(--border); margin: 0 auto 15px auto; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; cursor: pointer;" onclick="toggleAvatarSelector()">
-                👤
-            </div>
-            
-            <!-- Avatar Selection Box -->
-            <div id="avatar-selector" class="hidden" style="margin-bottom: 15px; padding: 10px; background: var(--surface-light); border-radius: 8px;">
-                <p style="margin-bottom: 10px;">Select Avatar:</p>
-                <div style="display: flex; justify-content: center; gap: 12px; font-size: 1.5rem; flex-wrap: wrap;">
-                    <span style="cursor:pointer;" onclick="setAvatar('👤')">👤</span>
-                    <span style="cursor:pointer;" onclick="setAvatar('👩')">👩</span>
-                    <span style="cursor:pointer;" onclick="setAvatar('👨')">👨</span>
-                    <span style="cursor:pointer;" onclick="setAvatar('👱‍♀️')">👱‍♀️</span>
-                    <span style="cursor:pointer;" onclick="setAvatar('🧔')">🧔</span>
-                    <span style="cursor:pointer;" onclick="setAvatar('🏋️‍♀️')">🏋️‍♀️</span>
-                    <span style="cursor:pointer;" onclick="setAvatar('🏃‍♂️')">🏃‍♂️</span>
-                    <span style="cursor:pointer;" onclick="setAvatar('🧘‍♀️')">🧘‍♀️</span>
-                    <span style="cursor:pointer;" onclick="setAvatar('🦁')">🦁</span>
-                </div>
-            </div>
-
-            <div class="flex-row" style="justify-content: center; align-items: center; gap: 5px;">
-                <h3 id="display-username" style="color: var(--primary); margin-bottom: 0;">Loading...</h3>
-                <button class="secondary small" style="padding: 2px 6px; font-size: 0.75rem;" onclick="toggleEditUsername()">Edit</button>
-            </div>
-            
-            <div id="edit-username-container" class="hidden" style="margin-top: 15px; background: var(--surface-light); padding: 10px; border-radius: 8px;">
-                <input type="text" id="edit-username-input" placeholder="New Username" style="margin-bottom: 10px;">
-                <div class="flex-row">
-                    <button class="small" onclick="saveUsername()">Save Name</button>
-                    <button class="secondary small" onclick="toggleEditUsername()">Cancel</button>
-                </div>
-            </div>
-
-            <!-- Install App Button (Hidden by default, shown by PWA logic) -->
-            <button id="btn-install" class="hidden" style="margin-top: 15px; background-color: var(--secondary); color: #000;" onclick="installApp()">📱 Install App on Phone</button>
-
-            <p id="display-bio" style="margin-top: 10px;">Member since 2024</p>
-            <button class="secondary" style="margin-top: 10px;" onclick="toggleAvatarSelector()">Change Avatar</button>
+    <!-- OUTSIDE: kWh + start/end time from ChargeMOD -->
+    <div id="row_outside" style="display:none">
+      <div class="form-row">
+        <div class="form-group">
+          <label>kWh Used (from ChargeMOD app or invoice)</label>
+          <input type="number" id="inp_kwh_direct" step="0.001" min="0" placeholder="e.g. 1.845" oninput="previewCost()" style="font-size:1.1rem;padding:12px 14px;">
         </div>
-        <button class="secondary" style="border-color: var(--danger); color: var(--danger);" onclick="logout()">Logout</button>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Start Time</label>
+          <input type="time" id="inp_time_start">
+        </div>
+        <div class="form-group">
+          <label>End Time</label>
+          <input type="time" id="inp_time_end">
+        </div>
+      </div>
     </div>
 
-    <!-- BOTTOM NAVIGATION -->
-    <nav id="bottom-nav">
-        <div class="nav-item active" onclick="switchTab('dashboard')">
-            <span class="nav-icon">📊</span>
-            <span>Dash</span>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Note (optional)</label>
+        <input type="text" id="inp_note" placeholder="e.g. Vismaya EVCS">
+      </div>
+    </div>
+
+    <div class="cost-preview" id="cost_preview"></div>
+
+    <button class="save-btn" id="save_btn" onclick="saveSession()">Add Session</button>
+  </div>
+</div>
+
+<!-- ═══════════ ALL SESSIONS ═══════════ -->
+<div id="tab_sessions" class="tab-pane">
+  <div class="section-title">All Charging Sessions</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th>Date</th>
+          <th>Battery</th>
+          <th>kWh</th>
+          <th>Tariff</th>
+          <th>Time</th>
+          <th>Cost</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="sessions_tbody">
+        <tr><td colspan="8" class="empty-row">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════ REPORTS ═══════════ -->
+<div id="tab_reports" class="tab-pane">
+  <div class="report-section" id="report_weekly"></div>
+  <div class="report-section" id="report_monthly"></div>
+  <div class="report-section" id="report_yearly"></div>
+</div>
+
+<!-- ═══════════ SETTINGS ═══════════ -->
+<div id="tab_settings" class="tab-pane">
+
+  <!-- 1. Battery Capacity -->
+  <div class="settings-card">
+    <div class="settings-title">🔋 Battery Capacity</div>
+    <div class="settings-row">
+      <div class="form-group">
+        <label>Usable Capacity (kWh)</label>
+        <input type="number" id="battery_cap" step="0.01" min="1" placeholder="3.07">
+      </div>
+      <button class="settings-save-btn" onclick="saveBattery()">Save</button>
+    </div>
+    <div class="settings-hint">
+      Used to convert battery % → kWh for home sessions.<br>
+      Currently saved: <strong id="cap_display" style="color:var(--accent)">—</strong>
+    </div>
+  </div>
+
+  <!-- 2. Calibrate from a known outside session -->
+  <div class="settings-card">
+    <div class="settings-title">🎯 Calibrate from ChargeMOD Session</div>
+    <div class="settings-hint" style="margin-bottom:16px">
+      You know the exact kWh from ChargeMOD. Enter the % change + kWh to calculate your real battery capacity.
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Start Battery %</label>
+        <input type="number" id="cal_start" min="0" max="100" placeholder="e.g. 18" oninput="runCalibration()">
+      </div>
+      <div class="form-group">
+        <label>End Battery %</label>
+        <input type="number" id="cal_end" min="0" max="100" placeholder="e.g. 37" oninput="runCalibration()">
+      </div>
+      <div class="form-group">
+        <label>Actual kWh (from invoice)</label>
+        <input type="number" id="cal_kwh" step="0.001" min="0" placeholder="e.g. 1.845" oninput="runCalibration()">
+      </div>
+    </div>
+    <div id="cal_result" class="cal-result" style="display:none">
+      <div class="cal-result-label">Calculated Battery Capacity</div>
+      <div class="cal-result-val" id="cal_result_val">—</div>
+      <div class="cal-result-sub" id="cal_result_sub">—</div>
+      <button class="settings-save-btn" style="margin-top:12px" onclick="applyCalibration()">Apply this Capacity</button>
+    </div>
+  </div>
+
+  <!-- 3. Home charging calibration tool -->
+  <div class="settings-card">
+    <div class="settings-title">🏠 Home Charging Calibrator</div>
+    <div class="settings-hint" style="margin-bottom:16px">
+      Enter %, times, and the <strong style="color:var(--accent)">actual kWh</strong> from your smart meter or charger app. It will calculate KSEB cost, charger speed, and auto-correct your battery capacity.
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Start Battery %</label>
+        <input type="number" id="est_start" min="0" max="100" placeholder="e.g. 57" oninput="runEstimator()">
+      </div>
+      <div class="form-group">
+        <label>End Battery %</label>
+        <input type="number" id="est_end" min="0" max="100" placeholder="e.g. 100" oninput="runEstimator()">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Plug-in Time</label>
+        <input type="time" id="est_time_start" oninput="runEstimator()">
+      </div>
+      <div class="form-group">
+        <label>Unplugged Time</label>
+        <input type="time" id="est_time_end" oninput="runEstimator()">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label>Actual kWh Used <span style="color:var(--accent)">(from smart meter / charger app)</span></label>
+        <input type="number" id="est_actual_kwh" step="0.001" min="0" placeholder="e.g. 1.32 — enter this for accurate results" oninput="runEstimator()" style="border-color:rgba(0,229,255,0.3)">
+      </div>
+    </div>
+    <div id="est_result" class="cal-result" style="display:none">
+      <div class="est-grid">
+        <div class="est-item">
+          <div class="est-label">Duration</div>
+          <div class="est-val" id="est_duration">—</div>
         </div>
-        <div class="nav-item" onclick="switchTab('workout')">
-            <span class="nav-icon">🏋️</span>
-            <span>Workout</span>
+        <div class="est-item">
+          <div class="est-label">kWh Charged</div>
+          <div class="est-val" id="est_kwh">—</div>
         </div>
-        <div class="nav-item" onclick="switchTab('social')">
-            <span class="nav-icon">🌍</span>
-            <span>Social</span>
+        <div class="est-item">
+          <div class="est-label">Charger Speed</div>
+          <div class="est-val" id="est_speed_out">—</div>
         </div>
-        <div class="nav-item" onclick="switchTab('profile')">
-            <span class="nav-icon">⚙️</span>
-            <span>Profile</span>
+        <div class="est-item">
+          <div class="est-label">KSEB Cost</div>
+          <div class="est-val" id="est_cost_home">—</div>
         </div>
-    </nav>
+      </div>
+      <div id="est_cap_hint" class="settings-hint" style="display:none;margin-top:12px;color:#86efac;background:rgba(34,197,94,0.07);border:1px solid rgba(34,197,94,0.2);border-radius:8px;padding:10px 12px;"></div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="settings-save-btn" onclick="saveChargerSpeed()" style="background:rgba(0,229,255,0.08);border-color:var(--accent);color:var(--accent)">💾 Save Speed & Capacity</button>
+        <button class="settings-save-btn" onclick="logFromEstimator()">+ Log as Home Session</button>
+      </div>
+    </div>
+    <div id="charger_speed_saved" class="settings-hint" style="margin-top:10px;display:none">
+      ✓ Saved: Charger speed <strong id="saved_speed_val" style="color:var(--accent)">—</strong> kW · used to estimate home session duration
+    </div>
+  </div>
+
+  <!-- Install app card -->
+  <div class="settings-card" id="install_settings_card">
+    <div class="settings-title">📲 Install as App</div>
+    <div class="settings-hint" style="margin-bottom:16px">
+      Install EV Tracker on your phone for a native app experience — works offline too.
+    </div>
+    <div id="install_android_block">
+      <button class="settings-save-btn" onclick="installApp()" style="margin-bottom:12px" id="install_btn_settings">Install on Android / Chrome</button>
+    </div>
+    <div class="settings-hint" style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;line-height:2">
+      <strong style="color:var(--text);display:block;margin-bottom:6px">📱 iPhone (Safari):</strong>
+      1. Open this file in <strong style="color:var(--accent)">Safari</strong><br>
+      2. Tap the <strong style="color:var(--accent)">Share</strong> button (box with arrow)<br>
+      3. Scroll down → tap <strong style="color:var(--accent)">"Add to Home Screen"</strong><br>
+      4. Tap <strong style="color:var(--accent)">Add</strong> — done!<br><br>
+      <strong style="color:var(--text);display:block;margin-bottom:6px">🤖 Android (Chrome):</strong>
+      Tap the <strong style="color:var(--accent)">Install</strong> button above, or look for<br>
+      <strong style="color:var(--accent)">"Add to Home Screen"</strong> in Chrome's menu (⋮)
+    </div>
+  </div>
+
+  <!-- 4. KSEB Tariff reference -->
+  <div class="settings-card">
+    <div class="settings-title">🏠 KSEB Tariff Slabs (Kerala Domestic)</div>
+    <table class="kseb-table">
+      <thead><tr><th>Units (kWh)</th><th>Rate per unit</th></tr></thead>
+      <tbody>
+        <tr><td>0 – 50</td><td>₹3.25</td></tr>
+        <tr><td>51 – 100</td><td>₹4.00</td></tr>
+        <tr><td>101 – 200</td><td>₹5.25</td></tr>
+        <tr><td>200+</td><td>₹6.85</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 5. ChargeMOD tariff reference -->
+  <div class="settings-card">
+    <div class="settings-title">⚡ ChargeMOD Tariff (Vismaya EVCS)</div>
+    <table class="kseb-table">
+      <thead><tr><th>Component</th><th>Rate</th></tr></thead>
+      <tbody>
+        <tr><td>Energy charge</td><td>₹0.00 / kWh</td></tr>
+        <tr><td>Service charge</td><td>₹9.00 / kWh</td></tr>
+        <tr><td>GST (18% on service)</td><td>₹1.62 / kWh</td></tr>
+        <tr><td>Effective total</td><td>₹10.62 / kWh</td></tr>
+        <tr><td>Solar tariff hours</td><td>09:00 – 16:00 IST</td></tr>
+        <tr><td>Non-solar hours</td><td>16:00 – 09:00 IST</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:10px;font-size:0.65rem;color:var(--muted)">
+      Verified · Invoice #1775100500331__5851123 · 02-04-2026
+    </div>
+  </div>
 
 </div>
 
-<script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc, collection, addDoc, onSnapshot, updateDoc, deleteDoc, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+</div><!-- /tabs-slider -->
+</div><!-- /tabs-viewport -->
+
+<!-- ═══════════ BOTTOM NAV (mobile) ═══════════ -->
+<nav class="bottom-nav" id="bottom_nav">
+  <button class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">
+    <span class="nav-icon">📊</span>
+    <span class="nav-label">Dashboard</span>
+  </button>
+  <button class="nav-item" data-tab="add" onclick="switchTab('add')">
+    <span class="nav-icon">⚡</span>
+    <span class="nav-label">Add</span>
+  </button>
+  <button class="nav-item" data-tab="sessions" onclick="switchTab('sessions')">
+    <span class="nav-icon">📋</span>
+    <span class="nav-label">Logs</span>
+  </button>
+  <button class="nav-item" data-tab="reports" onclick="switchTab('reports')">
+    <span class="nav-icon">📈</span>
+    <span class="nav-label">Reports</span>
+  </button>
+  <button class="nav-item" data-tab="settings" onclick="switchTab('settings')">
+    <span class="nav-icon">⚙️</span>
+    <span class="nav-label">Settings</span>
+  </button>
+</nav>
+
+<!-- Install banner -->
+<div id="install_banner" style="display:none;position:fixed;bottom:80px;left:16px;right:16px;background:var(--bg3);border:1px solid var(--accent);border-radius:14px;padding:14px 18px;z-index:200;display:none;align-items:center;gap:12px;box-shadow:0 8px 32px rgba(0,229,255,0.15);">
+  <span style="font-size:1.4rem">⚡</span>
+  <div style="flex:1">
+    <div style="font-family:'Syne',sans-serif;font-size:0.8rem;font-weight:700;color:var(--text)">Install EV Tracker</div>
+    <div style="font-size:0.65rem;color:var(--muted);margin-top:2px">Add to home screen for app experience</div>
+  </div>
+  <button onclick="installApp()" style="background:var(--accent);color:#0a0f1e;border:none;border-radius:8px;font-family:'Syne',sans-serif;font-size:0.72rem;font-weight:800;padding:8px 14px;cursor:pointer;white-space:nowrap">Install</button>
+  <button onclick="document.getElementById('install_banner').style.display='none'" style="background:transparent;border:none;color:var(--muted);font-size:1.1rem;cursor:pointer;padding:4px">✕</button>
+</div>
+
+<div id="toast" class="toast"></div>
 
-    // --- PWA SINGLE-FILE WORKAROUND LOGIC ---
-    let deferredPrompt;
-    
-    // 1. Dynamically Inject Web App Manifest
-    const manifestData = {
-        "name": "Vitality Health Tracker",
-        "short_name": "Vitality",
-        "start_url": window.location.href,
-        "display": "standalone",
-        "background_color": "#121212",
-        "theme_color": "#bb86fc",
-        "icons": [
-            {
-                "src": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%8B%3C/text%3E%3C/svg%3E",
-                "sizes": "192x192",
-                "type": "image/svg+xml"
-            },
-            {
-                "src": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%8B%3C/text%3E%3C/svg%3E",
-                "sizes": "512x512",
-                "type": "image/svg+xml"
-            }
-        ]
-    };
-    const manifestLink = document.createElement('link');
-    manifestLink.rel = 'manifest';
-    manifestLink.href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifestData));
-    document.head.appendChild(manifestLink);
-
-    // 2. Dynamically Register Service Worker via Blob (Required for PWA Install Prompt)
-    if ('serviceWorker' in navigator) {
-        const swCode = `
-            self.addEventListener('install', e => self.skipWaiting());
-            self.addEventListener('activate', e => self.clients.claim());
-            self.addEventListener('fetch', e => {
-                // Pass-through minimal fetch handler
-            });
-        `;
-        const blob = new Blob([swCode], { type: 'application/javascript' });
-        const swUrl = URL.createObjectURL(blob);
-        navigator.serviceWorker.register(swUrl).catch(err => console.log('SW registration error:', err));
-    }
-
-    // 3. Catch Install Prompt
-    window.addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault();
-        deferredPrompt = e;
-        const installBtn = document.getElementById('btn-install');
-        if(installBtn) installBtn.classList.remove('hidden');
-    });
-
-    window.installApp = async () => {
-        if (deferredPrompt) {
-            deferredPrompt.prompt();
-            const { outcome } = await deferredPrompt.userChoice;
-            if (outcome === 'accepted') console.log('App installed');
-            deferredPrompt = null;
-            document.getElementById('btn-install').classList.add('hidden');
-        }
-    };
-
-
-    // Strict Firebase Config handling
-    const userConfig = {
-        apiKey: "AIzaSyAJ9K9fQ0ThMB7aXB6qNHr3_yLUdqJgnCM",
-        authDomain: "my-chain-reaction-game.firebaseapp.com",
-        projectId: "my-chain-reaction-game",
-        storageBucket: "my-chain-reaction-game.appspot.com",
-        messagingSenderId: "32751418407",
-        appId: "1:32751418407:web:ff8244007ef2b099d56202"
-    };
-    
-    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userConfig;
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'vitality-app';
-
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    // Global State
-    let isSignupMode = false;
-    let currentUserData = null;
-    let currentUserId = null;
-    let targets = { water: 2500, cals: 2000 }; 
-    let editingWorkoutId = null; 
-    
-    // Listeners
-    let unsubDaily = null;
-    let unsubWorkouts = null;
-    let unsubPublicUsers = null;
-    let unsubRelationships = null;
-
-    // Caches
-    let publicUsersMap = {};
-    let myRelationships = {}; 
-    let currentWorkoutsMap = {}; 
-
-    // --- UTILITIES ---
-    const getTodayStr = () => {
-        const d = new Date();
-        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    };
-
-    window.showToast = (msg) => {
-        const toast = document.getElementById('toast');
-        toast.innerText = msg;
-        toast.classList.add('show');
-        setTimeout(() => toast.classList.remove('show'), 3000);
-    };
-
-    // Helper for Progress Bars
-    function updateProgressBar(elementId, current, target) {
-        const pct = Math.min((current / target) * 100, 100) || 0;
-        const bar = document.getElementById(elementId);
-        bar.style.width = `${pct}%`;
-        bar.classList.toggle('success', pct >= 100);
-    }
-
-    // Keep public profile updated for search/leaderboards
-    async function updatePublicProfile(uid, username, avatar, score) {
-        try {
-            const publicRef = doc(db, 'artifacts', appId, 'public', 'data', 'user_registry', uid);
-            await setDoc(publicRef, { username, avatar, uid, score }, { merge: true });
-        } catch(e) {
-            console.error("Failed to update public registry", e);
-        }
-    }
-
-    // Give points for activities
-    async function awardPoints(pts) {
-        if (!currentUserId || !currentUserData) return;
-        
-        let currentScore = currentUserData.score || 0;
-        let newScore = currentScore + pts;
-        
-        if (newScore < 0) newScore = 0; 
-        
-        currentUserData.score = newScore;
-        document.getElementById('my-score-display').innerText = newScore;
-        
-        const profileRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'profile', 'info');
-        await updateDoc(profileRef, { score: newScore });
-        await updatePublicProfile(currentUserId, currentUserData.username, currentUserData.avatar || '👤', newScore);
-    }
-
-    // --- UI LOGIC ---
-    window.toggleAuthMode = () => {
-        isSignupMode = !isSignupMode;
-        document.getElementById('signup-fields').classList.toggle('hidden', !isSignupMode);
-        document.getElementById('auth-title').innerText = isSignupMode ? 'Sign Up' : 'Login';
-        document.getElementById('btn-action').innerText = isSignupMode ? 'Create Account' : 'Login';
-        document.getElementById('auth-toggle-text').innerText = isSignupMode ? 'Already have an account? Login' : 'Need an account? Sign up';
-    };
-
-    window.switchTab = (tabId) => {
-        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
-        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-        
-        document.getElementById(`view-${tabId}`).classList.add('active');
-        
-        const targetNav = document.querySelector(`.nav-item[onclick="switchTab('${tabId}')"]`);
-        if(targetNav) targetNav.classList.add('active');
-    };
-
-    window.toggleWorkoutFields = () => {
-        const type = document.getElementById('workout-type').value;
-        document.getElementById('strength-fields').classList.toggle('hidden', type !== 'strength');
-        document.getElementById('cardio-fields').classList.toggle('hidden', type === 'strength');
-    };
-
-    // --- AUTHENTICATION ---
-    window.handleAuth = async () => {
-        const email = document.getElementById('auth-email').value;
-        const password = document.getElementById('auth-password').value;
-        
-        try {
-            if (isSignupMode) {
-                const username = document.getElementById('auth-username').value;
-                const gender = document.getElementById('auth-gender').value;
-                const age = parseInt(document.getElementById('auth-age').value);
-                const height = parseInt(document.getElementById('auth-height').value);
-                const weight = parseFloat(document.getElementById('auth-weight').value);
-
-                if (!gender || !age || !height || !weight || !username) {
-                    return showToast("Please fill all fields.");
-                }
-                
-                const userCred = await createUserWithEmailAndPassword(auth, email, password);
-                const uid = userCred.user.uid;
-                
-                const profileRef = doc(db, 'artifacts', appId, 'users', uid, 'profile', 'info');
-                await setDoc(profileRef, { username, gender, age, height, weight, avatar: '👤', score: 0, createdAt: Date.now() });
-                await updatePublicProfile(uid, username, '👤', 0);
-                
-                showToast("Account Created!");
-            } else {
-                await signInWithEmailAndPassword(auth, email, password);
-                showToast("Logged In!");
-            }
-        } catch (error) {
-            showToast(error.message.replace('Firebase: ', ''));
-        }
-    };
-
-    window.logout = async () => {
-        if(unsubDaily) unsubDaily();
-        if(unsubWorkouts) unsubWorkouts();
-        if(unsubPublicUsers) unsubPublicUsers();
-        if(unsubRelationships) unsubRelationships();
-        await signOut(auth);
-    };
-
-    // --- CORE LOGIC & LISTENERS ---
-    onAuthStateChanged(auth, async (user) => {
-        if (user) {
-            currentUserId = user.uid;
-            document.getElementById('view-auth').classList.remove('active');
-            document.getElementById('bottom-nav').classList.add('active');
-            
-            setupPublicUsersListener();
-            setupRelationshipsListener();
-            await loadUserProfile();
-            setupDailyListener();
-            setupWorkoutsListener();
-            listenToGlobalWorkouts();
-            
-            switchTab('dashboard');
-        } else {
-            currentUserId = null;
-            currentUserData = null;
-            publicUsersMap = {};
-            myRelationships = {};
-            currentWorkoutsMap = {};
-            document.getElementById('bottom-nav').classList.remove('active');
-            document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
-            document.getElementById('view-auth').classList.add('active');
-            document.getElementById('cycle-tracker').classList.add('hidden');
-        }
-    });
-
-    function setupPublicUsersListener() {
-        if (!currentUserId) return;
-        const regRef = collection(db, 'artifacts', appId, 'public', 'data', 'user_registry');
-        unsubPublicUsers = onSnapshot(regRef, (snapshot) => {
-            snapshot.forEach(docSnap => {
-                publicUsersMap[docSnap.id] = docSnap.data();
-            });
-            renderSocialLists(); 
-            if(document.getElementById('search-user-input').value) searchUsers(); 
-        }, (err) => console.error(err));
-    }
-
-    function setupRelationshipsListener() {
-        if (!currentUserId) return;
-        const relRef = collection(db, 'artifacts', appId, 'public', 'data', 'relationships');
-        
-        unsubRelationships = onSnapshot(relRef, (snapshot) => {
-            myRelationships = {};
-            const requests = [];
-            const friends = [];
-
-            snapshot.forEach(docSnap => {
-                const data = docSnap.data();
-                if (data.uidA === currentUserId || data.uidB === currentUserId) {
-                    const otherUid = data.uidA === currentUserId ? data.uidB : data.uidA;
-                    myRelationships[otherUid] = { status: data.status, docId: docSnap.id, requester: data.requester };
-
-                    if (data.status === 'pending' && data.requester !== currentUserId) {
-                        requests.push(otherUid);
-                    } else if (data.status === 'accepted') {
-                        friends.push(otherUid);
-                    }
-                }
-            });
-
-            lastRequests = requests;
-            lastFriends = friends;
-            renderSocialLists();
-
-        }, (err) => console.error(err));
-    }
-
-    async function loadUserProfile() {
-        if (!currentUserId) return;
-        const profileRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'profile', 'info');
-        const docSnap = await getDoc(profileRef);
-        
-        if (docSnap.exists()) {
-            currentUserData = docSnap.data();
-            
-            document.getElementById('display-username').innerText = currentUserData.username || "User";
-            document.getElementById('current-weight-display').innerText = currentUserData.weight || "--";
-            document.getElementById('my-score-display').innerText = currentUserData.score || 0;
-            
-            if (currentUserData.avatar) {
-                document.getElementById('user-avatar').innerText = currentUserData.avatar;
-            }
-            
-            if (currentUserData.gender === 'female') {
-                document.getElementById('cycle-tracker').classList.remove('hidden');
-                updateCycleUI(); 
-            }
-
-            if(currentUserData.username) {
-                updatePublicProfile(currentUserId, currentUserData.username, currentUserData.avatar || '👤', currentUserData.score || 0);
-            }
-
-            calculateMetrics();
-        }
-    }
-
-    function calculateMetrics() {
-        if (!currentUserData) return;
-        const { weight, height, age, gender } = currentUserData;
-        
-        const heightM = height / 100;
-        const bmi = (weight / (heightM * heightM)).toFixed(1);
-        let bmiStatus = "Normal";
-        let bmiColor = "var(--success)";
-        if(bmi < 18.5) { bmiStatus = "Underweight"; bmiColor = "#ffb74d"; }
-        else if(bmi > 25) { bmiStatus = "Overweight"; bmiColor = "var(--danger)"; }
-        
-        const bmiEl = document.getElementById('bmi-display');
-        bmiEl.innerText = `BMI: ${bmi} (${bmiStatus})`;
-        bmiEl.style.color = bmiColor;
-
-        let bmr = (10 * weight) + (6.25 * height) - (5 * age);
-        bmr += (gender === 'male') ? 5 : -161;
-        targets.cals = Math.round(bmr * 1.2); 
-        targets.water = Math.round(weight * 35);
-
-        document.getElementById('target-cals').innerText = targets.cals;
-        document.getElementById('target-water').innerText = targets.water;
-        document.getElementById('cals-target-display').innerText = targets.cals;
-        document.getElementById('water-target-display').innerText = targets.water;
-    }
-
-    function setupDailyListener() {
-        if (!currentUserId) return;
-        const dailyRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'daily_logs', getTodayStr());
-        
-        unsubDaily = onSnapshot(dailyRef, (docSnap) => {
-            let water = 0, cals = 0;
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                water = data.water || 0;
-                cals = data.calories || 0;
-            }
-            
-            document.getElementById('water-current').innerText = water;
-            updateProgressBar('water-progress', water, targets.water);
-
-            document.getElementById('cals-current').innerText = cals;
-            updateProgressBar('cals-progress', cals, targets.cals);
-            
-        }, (err) => console.error(err));
-    }
-
-    function setupWorkoutsListener() {
-        if (!currentUserId) return;
-        const workoutsRef = collection(db, 'artifacts', appId, 'users', currentUserId, 'workouts');
-        
-        unsubWorkouts = onSnapshot(workoutsRef, (snapshot) => {
-            currentWorkoutsMap = {};
-            const todayStr = getTodayStr();
-            const listEl = document.getElementById('today-workouts-list');
-            listEl.innerHTML = '';
-
-            snapshot.forEach(docSnap => {
-                const data = docSnap.data();
-                if(data.date === todayStr) {
-                    currentWorkoutsMap[docSnap.id] = data; 
-                    
-                    const div = document.createElement('div');
-                    div.className = 'workout-item flex-between';
-                    
-                    let details = data.type === 'strength' 
-                        ? `${data.weight}kg x ${data.reps} reps`
-                        : `${data.time} mins, ${data.distance} km`;
-                    
-                    div.innerHTML = `
-                        <div style="flex: 1;">
-                            <span><strong>${data.name}</strong></span><br>
-                            <span style="font-size: 0.8rem; color: var(--text-muted);">${details}</span>
-                        </div>
-                        <div class="flex-row" style="gap: 5px;">
-                            <button class="small secondary" style="padding: 4px 8px; font-size: 0.8rem;" onclick="editWorkout('${docSnap.id}')">✏️</button>
-                            <button class="small danger" style="padding: 4px 8px; font-size: 0.8rem;" onclick="deleteWorkout('${docSnap.id}')">🗑️</button>
-                        </div>
-                    `;
-                    listEl.appendChild(div);
-                }
-            });
-
-            if(!Object.keys(currentWorkoutsMap).length) {
-                listEl.innerHTML = '<p>No workouts logged today.</p>';
-            }
-        }, (err) => console.error(err));
-    }
-
-    function listenToGlobalWorkouts() {
-        if (!currentUserId) return;
-        const globalRef = collection(db, 'artifacts', appId, 'public', 'data', 'global_workouts');
-        onSnapshot(globalRef, (snapshot) => {
-            const datalist = document.getElementById('global-workouts');
-            datalist.innerHTML = ''; 
-            snapshot.forEach((doc) => {
-                const option = document.createElement('option');
-                option.value = doc.data().name;
-                datalist.appendChild(option);
-            });
-        }, (err) => console.error(err));
-    }
-
-    // --- SOCIAL & FRIEND LOGIC ---
-
-    let lastRequests = [];
-    let lastFriends = [];
-    function renderSocialLists() {
-        renderGlobalLeaderboard();
-        renderRequestsList(lastRequests);
-        renderFriendsList(lastFriends);
-    }
-
-    function renderGlobalLeaderboard() {
-        const listEl = document.getElementById('global-leaderboard-list');
-        if(!listEl) return;
-        listEl.innerHTML = '';
-
-        const allUsers = Object.values(publicUsersMap)
-            .sort((a, b) => (b.score || 0) - (a.score || 0))
-            .slice(0, 2);
-
-        if (allUsers.length === 0) {
-            listEl.innerHTML = '<p style="font-size: 0.9rem; color: var(--text-muted);">No users yet.</p>';
-            return;
-        }
-
-        allUsers.forEach((user, index) => {
-            const medal = index === 0 ? '🥇' : '🥈';
-            const isMe = user.uid === currentUserId;
-            
-            const div = document.createElement('div');
-            div.className = 'list-item';
-            div.innerHTML = `
-                <div class="flex-row">
-                    <span style="font-weight: bold; width: 30px; font-size: 1.2rem; text-align: center;">${medal}</span>
-                    <span style="font-size: 1.5rem;">${user.avatar || '👤'}</span>
-                    <span>${user.username} ${isMe ? '<span style="color:var(--text-muted);font-size:0.8em;">(You)</span>' : ''}</span>
-                </div>
-                <div class="badge" style="background: var(--primary-variant); color: #fff;">
-                    Score: ${user.score || 0}
-                </div>
-            `;
-            listEl.appendChild(div);
-        });
-    }
-
-    function renderRequestsList(requests) {
-        const listEl = document.getElementById('friend-requests-list');
-        const cardEl = document.getElementById('requests-card');
-        listEl.innerHTML = '';
-
-        if(requests.length === 0) {
-            cardEl.style.display = 'none';
-            return;
-        }
-
-        cardEl.style.display = 'block';
-        requests.forEach(uid => {
-            const user = publicUsersMap[uid];
-            if(!user) return; 
-            const relInfo = myRelationships[uid];
-
-            const div = document.createElement('div');
-            div.className = 'list-item';
-            div.innerHTML = `
-                <div class="flex-row">
-                    <span style="font-size: 1.5rem;">${user.avatar || '👤'}</span>
-                    <span><strong>${user.username}</strong></span>
-                </div>
-                <div class="flex-row" style="gap: 5px;">
-                    <button class="small" onclick="handleFriendRequest('${relInfo.docId}', 'accepted')">Accept</button>
-                    <button class="small danger" onclick="handleFriendRequest('${relInfo.docId}', 'declined')">X</button>
-                </div>
-            `;
-            listEl.appendChild(div);
-        });
-    }
-
-    function renderFriendsList(friends) {
-        const listEl = document.getElementById('my-friends-list');
-        listEl.innerHTML = '';
-
-        if(friends.length === 0) {
-            listEl.innerHTML = '<p style="font-size: 0.9rem; color: var(--text-muted);">No friends yet. Add someone below!</p>';
-            return;
-        }
-
-        const allCompetitors = friends.map(uid => publicUsersMap[uid]).filter(u => u);
-        
-        if(currentUserData && currentUserId) {
-            const myPublicData = publicUsersMap[currentUserId] || { ...currentUserData, uid: currentUserId };
-            if (!allCompetitors.find(u => u.uid === currentUserId)) {
-                allCompetitors.push(myPublicData);
-            }
-        }
-
-        const sortedCompetitors = allCompetitors.sort((a, b) => (b.score || 0) - (a.score || 0));
-
-        sortedCompetitors.forEach((user, index) => {
-            const isMe = user.uid === currentUserId;
-            
-            let rankBadge = `<span style="color: var(--text-muted);">#${index+1}</span>`;
-            if (index === 0) rankBadge = '🥇';
-            if (index === 1) rankBadge = '🥈';
-            if (index === 2) rankBadge = '🥉';
-            
-            const div = document.createElement('div');
-            div.className = 'list-item ' + (isMe ? '' : 'friend-item');
-            if (!isMe) {
-                div.onclick = () => openComparison(user.uid);
-            }
-            
-            div.innerHTML = `
-                <div class="flex-row">
-                    <span style="font-weight: bold; width: 30px; text-align: center; font-size: 1.1rem;">${rankBadge}</span>
-                    <span style="font-size: 1.5rem;">${user.avatar || '👤'}</span>
-                    <span>${user.username} ${isMe ? '<span style="color:var(--text-muted);font-size:0.8em;">(You)</span>' : ''}</span>
-                </div>
-                <div class="badge" style="background: ${isMe ? 'var(--primary-variant)' : 'var(--surface)'}; color: ${isMe ? '#fff' : 'var(--primary)'}">
-                    Score: ${user.score || 0}
-                </div>
-            `;
-            listEl.appendChild(div);
-        });
-    }
-
-    window.searchUsers = () => {
-        if (!currentUserId) return;
-        const queryText = document.getElementById('search-user-input').value.trim().toLowerCase();
-        const resultsDiv = document.getElementById('search-user-results');
-        resultsDiv.innerHTML = '';
-
-        let foundCount = 0;
-        
-        Object.values(publicUsersMap).forEach(user => {
-            if (!queryText || (user.username && user.username.toLowerCase().includes(queryText))) {
-                foundCount++;
-                const isSelf = user.uid === currentUserId;
-                const relInfo = myRelationships[user.uid];
-                
-                let btnHtml = '';
-                if (!isSelf) {
-                    if (!relInfo) {
-                        btnHtml = `<button class="secondary small" onclick="sendFriendRequest('${user.uid}')">Add</button>`;
-                    } else if (relInfo.status === 'pending') {
-                        if (relInfo.requester === currentUserId) {
-                            btnHtml = `<span style="font-size: 0.8rem; color: var(--text-muted);">Pending</span>`;
-                        } else {
-                            btnHtml = `<button class="small" onclick="handleFriendRequest('${relInfo.docId}', 'accepted')">Accept</button>`;
-                        }
-                    } else if (relInfo.status === 'accepted') {
-                        btnHtml = `<button class="secondary small" onclick="openComparison('${user.uid}')">VS</button>`;
-                    }
-                }
-
-                const userDiv = document.createElement('div');
-                userDiv.className = 'user-result-item';
-                userDiv.innerHTML = `
-                    <div class="flex-row">
-                        <span style="font-size: 1.5rem; background: var(--surface); width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; border-radius: 50%;">${user.avatar || '👤'}</span>
-                        <div>
-                            <div style="font-weight: 500;">${user.username} ${isSelf ? '<span style="color:var(--text-muted);font-size:0.8em;">(You)</span>' : ''}</div>
-                            <div style="font-size: 0.7rem; color: var(--primary);">Score: ${user.score || 0}</div>
-                        </div>
-                    </div>
-                    ${btnHtml}
-                `;
-                resultsDiv.appendChild(userDiv);
-            }
-        });
-
-        if (foundCount === 0) {
-            resultsDiv.innerHTML = '<p style="font-size: 0.9rem; color: var(--text-muted);">No users found.</p>';
-        }
-    };
-
-    window.sendFriendRequest = async (targetUid) => {
-        if (!currentUserId) return;
-        const uids = [currentUserId, targetUid].sort();
-        const relId = `${uids[0]}_${uids[1]}`;
-        const relRef = doc(db, 'artifacts', appId, 'public', 'data', 'relationships', relId);
-        
-        try {
-            await setDoc(relRef, {
-                uidA: uids[0],
-                uidB: uids[1],
-                requester: currentUserId,
-                status: 'pending',
-                timestamp: Date.now()
-            });
-            showToast("Friend Request Sent!");
-            searchUsers(); 
-        } catch(e) {
-            console.error(e);
-            showToast("Failed to send request.");
-        }
-    };
-
-    window.handleFriendRequest = async (docId, action) => {
-        const relRef = doc(db, 'artifacts', appId, 'public', 'data', 'relationships', docId);
-        try {
-            if(action === 'accepted') {
-                await updateDoc(relRef, { status: 'accepted' });
-                showToast("Request Accepted!");
-            } else {
-                await deleteDoc(relRef);
-                showToast("Request Declined");
-            }
-            if(document.getElementById('search-user-input').value) searchUsers();
-        } catch(e) {
-            showToast("Error updating request");
-        }
-    };
-
-    // --- COMPARISON (VS) LOGIC ---
-    window.openComparison = (friendUid) => {
-        const friend = publicUsersMap[friendUid];
-        if(!friend || !currentUserData) return;
-
-        const myScore = currentUserData.score || 0;
-        const friendScore = friend.score || 0;
-        const total = (myScore + friendScore) || 1; 
-
-        document.getElementById('comp-me-avatar').innerText = currentUserData.avatar || '👤';
-        document.getElementById('comp-me-name').innerText = currentUserData.username;
-        document.getElementById('comp-me-score').innerText = myScore;
-
-        document.getElementById('comp-friend-avatar').innerText = friend.avatar || '👤';
-        document.getElementById('comp-friend-name').innerText = friend.username;
-        document.getElementById('comp-friend-score').innerText = friendScore;
-
-        document.getElementById('vs-bar-me').style.width = `${(myScore / total) * 100}%`;
-        document.getElementById('vs-bar-friend').style.width = `${(friendScore / total) * 100}%`;
-
-        const msgEl = document.getElementById('comp-message');
-        if (myScore > friendScore) {
-            msgEl.innerText = "You're in the lead! Keep it up!";
-            msgEl.style.color = "var(--success)";
-        } else if (myScore < friendScore) {
-            msgEl.innerText = "They are pulling ahead! Log a workout to catch up!";
-            msgEl.style.color = "var(--danger)";
-        } else {
-            msgEl.innerText = "It's a tie! Time to grind!";
-            msgEl.style.color = "var(--warning)";
-        }
-
-        document.getElementById('comparison-modal').classList.remove('hidden');
-    };
-
-    window.closeComparison = () => {
-        document.getElementById('comparison-modal').classList.add('hidden');
-    };
-
-    // --- WORKOUT EDITING & DELETION LOGIC ---
-    window.deleteWorkout = async (docId) => {
-        if (!currentUserId) return;
-        try {
-            await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUserId, 'workouts', docId));
-            showToast("Workout deleted. (-50 pts)");
-            await awardPoints(-50); 
-        } catch(e) {
-            showToast("Error deleting workout.");
-        }
-    };
-
-    window.editWorkout = (docId) => {
-        const workout = currentWorkoutsMap[docId];
-        if(!workout) return;
-
-        editingWorkoutId = docId;
-
-        document.getElementById('workout-view-title').innerText = "Edit Workout";
-        document.getElementById('workout-name').value = workout.name;
-        document.getElementById('workout-type').value = workout.type;
-        toggleWorkoutFields();
-
-        if(workout.type === 'strength') {
-            document.getElementById('workout-weight').value = workout.weight || '';
-            document.getElementById('workout-reps').value = workout.reps || '';
-        } else {
-            document.getElementById('workout-time').value = workout.time || '';
-            document.getElementById('workout-dist').value = workout.distance || '';
-        }
-
-        document.getElementById('btn-save-workout').innerText = "Update Workout";
-        document.getElementById('btn-cancel-edit').classList.remove('hidden');
-
-        switchTab('workout');
-    };
-
-    window.cancelEditWorkout = () => {
-        editingWorkoutId = null;
-        
-        document.getElementById('workout-view-title').innerText = "Add Workout";
-        document.getElementById('workout-name').value = '';
-        document.getElementById('workout-weight').value = '';
-        document.getElementById('workout-reps').value = '';
-        document.getElementById('workout-time').value = '';
-        document.getElementById('workout-dist').value = '';
-
-        document.getElementById('btn-save-workout').innerText = "Save Workout";
-        document.getElementById('btn-cancel-edit').classList.add('hidden');
-
-        switchTab('dashboard');
-    };
-
-    // --- ACTIONS TRIGGERING LOGS AND POINTS ---
-    window.addWater = async () => {
-        const input = document.getElementById('water-input');
-        const amount = parseInt(input.value);
-        if(!amount || amount <= 0) return;
-        input.value = '';
-        await processWaterLog(amount);
-    };
-
-    window.addWaterFast = async (amount) => {
-        await processWaterLog(amount);
-    };
-
-    async function processWaterLog(amount) {
-        await updateDailyLog('water', amount);
-        const pts = Math.max(1, Math.floor(amount / 50));
-        showToast(`Added ${amount}ml water (+${pts} pts)`);
-        await awardPoints(pts);
-    }
-
-    window.addCalories = async () => {
-        const input = document.getElementById('cals-input');
-        const amount = parseInt(input.value);
-        if(!amount || amount <= 0) return;
-        await updateDailyLog('calories', amount);
-        input.value = '';
-        showToast(`Logged ${amount} kcal (+5 pts)`);
-        await awardPoints(5);
-    };
-
-    window.updateWeight = async () => {
-        if (!currentUserId) return;
-        const input = document.getElementById('weight-input');
-        const newWeight = parseFloat(input.value);
-        if(!newWeight || newWeight <= 0) return;
-
-        const profileRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'profile', 'info');
-        await updateDoc(profileRef, { weight: newWeight });
-        
-        input.value = '';
-        showToast("Weight updated! (+10 pts)");
-        await loadUserProfile(); 
-        await awardPoints(10);
-    };
-
-    window.saveWorkout = async () => {
-        if (!currentUserId) return;
-        const name = document.getElementById('workout-name').value.trim();
-        const type = document.getElementById('workout-type').value;
-        if(!name) return showToast("Workout name required.");
-
-        let workoutData = { name, type, date: getTodayStr(), timestamp: Date.now() };
-
-        if(type === 'strength') {
-            workoutData.weight = parseFloat(document.getElementById('workout-weight').value) || 0;
-            workoutData.reps = parseInt(document.getElementById('workout-reps').value) || 0;
-        } else {
-            workoutData.time = parseFloat(document.getElementById('workout-time').value) || 0;
-            workoutData.distance = parseFloat(document.getElementById('workout-dist').value) || 0;
-        }
-
-        try {
-            if (editingWorkoutId) {
-                const workoutRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'workouts', editingWorkoutId);
-                await updateDoc(workoutRef, {
-                    name: workoutData.name,
-                    type: workoutData.type,
-                    weight: workoutData.weight || null,
-                    reps: workoutData.reps || null,
-                    time: workoutData.time || null,
-                    distance: workoutData.distance || null
-                });
-                
-                showToast("Workout Updated!");
-                cancelEditWorkout(); 
-                
-            } else {
-                const personalRef = collection(db, 'artifacts', appId, 'users', currentUserId, 'workouts');
-                await addDoc(personalRef, workoutData);
-
-                showToast("Workout Logged! (+50 pts)");
-                await awardPoints(50); 
-                
-                document.getElementById('workout-name').value = '';
-                document.getElementById('workout-weight').value = '';
-                document.getElementById('workout-reps').value = '';
-                document.getElementById('workout-time').value = '';
-                document.getElementById('workout-dist').value = '';
-                
-                switchTab('dashboard');
-            }
-
-            const globalRef = doc(db, 'artifacts', appId, 'public', 'data', 'global_workouts', name.toLowerCase().replace(/\s+/g, '_'));
-            await setDoc(globalRef, { name, type }, { merge: true });
-
-        } catch (error) {
-            console.error(error);
-            showToast("Error saving workout");
-        }
-    };
-
-    // Optimized Core Database Logging Using Increment
-    async function updateDailyLog(field, amount) {
-        if (!currentUserId) return;
-        const dailyRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'daily_logs', getTodayStr());
-        try {
-            await setDoc(dailyRef, { [field]: increment(amount) }, { merge: true });
-        } catch(e) {
-            console.error(e);
-            showToast("Error saving data");
-        }
-    }
-
-    // --- OTHER USER PROFILE ACTIONS ---
-    window.toggleEditUsername = () => {
-        const container = document.getElementById('edit-username-container');
-        container.classList.toggle('hidden');
-        if (!container.classList.contains('hidden') && currentUserData) {
-            document.getElementById('edit-username-input').value = currentUserData.username || '';
-        }
-    };
-
-    window.saveUsername = async () => {
-        const newName = document.getElementById('edit-username-input').value.trim();
-        if (!newName) return showToast("Username cannot be empty.");
-        if (!currentUserId) return;
-
-        try {
-            const profileRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'profile', 'info');
-            await updateDoc(profileRef, { username: newName });
-            
-            await updatePublicProfile(currentUserId, newName, currentUserData.avatar || '👤', currentUserData.score || 0);
-
-            currentUserData.username = newName;
-            document.getElementById('display-username').innerText = newName;
-            toggleEditUsername();
-            showToast("Username updated!");
-        } catch (e) {
-            showToast("Failed to update username");
-        }
-    };
-
-    window.toggleAvatarSelector = () => {
-        document.getElementById('avatar-selector').classList.toggle('hidden');
-    };
-
-    window.setAvatar = async (emoji) => {
-        if (!currentUserId) return;
-        const profileRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'profile', 'info');
-        await updateDoc(profileRef, { avatar: emoji });
-        
-        await updatePublicProfile(currentUserId, currentUserData.username, emoji, currentUserData.score || 0);
-
-        currentUserData.avatar = emoji;
-        document.getElementById('user-avatar').innerText = emoji;
-        document.getElementById('avatar-selector').classList.add('hidden');
-        showToast("Avatar updated!");
-    };
-
-    window.logCycleStart = async () => {
-        if (!currentUserId) return;
-        const dateInput = document.getElementById('cycle-date').value;
-        if (!dateInput) return showToast("Please select a date.");
-
-        const profileRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'profile', 'info');
-        await updateDoc(profileRef, { lastCycleStart: dateInput });
-        
-        showToast("Cycle Day 1 Logged!");
-        document.getElementById('cycle-date').value = '';
-        
-        currentUserData.lastCycleStart = dateInput;
-        updateCycleUI();
-    };
-
-    function updateCycleUI() {
-        if (!currentUserData || currentUserData.gender !== 'female') return;
-        
-        const statusDiv = document.getElementById('cycle-status');
-        if (!currentUserData.lastCycleStart) {
-            statusDiv.innerHTML = '<p>No cycle data logged yet.</p>';
-            return;
-        }
-
-        const lastStart = new Date(currentUserData.lastCycleStart);
-        const cycleLength = 28; 
-        
-        const nextCycle = new Date(lastStart);
-        nextCycle.setDate(nextCycle.getDate() + cycleLength);
-        
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        
-        const diffTime = nextCycle - today;
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-        let statusHtml = '';
-        if (diffDays > 0) {
-            statusHtml = `<p style="color: var(--primary); font-size: 1.1rem; font-weight: bold;">Next cycle in ${diffDays} days</p>
-                          <p style="font-size: 0.8rem; margin-top: 4px;">Predicted start: ${nextCycle.toLocaleDateString()}</p>`;
-        } else if (diffDays === 0) {
-            statusHtml = `<p style="color: var(--danger); font-size: 1.1rem; font-weight: bold;">Predicted to start today!</p>`;
-        } else {
-            statusHtml = `<p style="color: var(--danger); font-size: 1.1rem; font-weight: bold;">${Math.abs(diffDays)} days late</p>
-                          <p style="font-size: 0.8rem; margin-top: 4px;">Log your new Day 1 below when it begins.</p>`;
-        }
-        
-        statusDiv.innerHTML = statusHtml;
-    }
-
-</script>
 </body>
 </html>
