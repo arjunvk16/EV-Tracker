@@ -2,19 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>EV Charge Tracker — Arjun V K</title>
-<!-- PWA Meta Tags -->
-<meta name="theme-color" content="#0a0f1e">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
- 
+
 <!-- Firebase SDKs -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getFirestore, collection, addDoc, getDocs, deleteDoc, updateDoc, doc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
- 
+  import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
   const firebaseConfig = {
     apiKey: "AIzaSyAJ9K9fQ0ThMB7aXB6qNHr3_yLUdqJgnCM",
     authDomain: "my-chain-reaction-game.firebaseapp.com",
@@ -24,81 +20,35 @@
     appId: "1:32751418407:web:ff8244007ef2b099d56202",
     measurementId: "G-D6ZRG8LK2H"
   };
- 
+
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
- 
+
   // ─── KSEB Tariff Slabs (Kerala Domestic) ───────────────────────────────────
   function ksebCost(units) {
     let cost = 0;
-    if (units <= 50) {
-      cost = units * 3.25;
-    } else if (units <= 100) {
-      cost = 50 * 3.25 + (units - 50) * 4.05;
-    } else if (units <= 150) {
-      cost = 50 * 3.25 + 50 * 4.05 + (units - 100) * 5.10;
-    } else if (units <= 200) {
-      cost = 50 * 3.25 + 50 * 4.05 + 50 * 5.10 + (units - 150) * 6.95;
-    } else {
-      cost = 50 * 3.25 + 50 * 4.05 + 50 * 5.10 + 50 * 6.95 + (units - 200) * 8.20;
-    }
+    if (units <= 50)        cost = units * 3.25;
+    else if (units <= 100)  cost = 50 * 3.25 + (units - 50) * 4.00;
+    else if (units <= 200)  cost = 50 * 3.25 + 50 * 4.00 + (units - 100) * 5.25;
+    else                    cost = 50 * 3.25 + 50 * 4.00 + 100 * 5.25 + (units - 200) * 6.85;
     return parseFloat(cost.toFixed(2));
   }
- 
+
   // ─── ChargeMOD Tariff (from invoice) ───────────────────────────────────────
+  // Energy: ₹0/kWh (NS tariff), Service: ₹9/kWh + 18% GST on service only
+  // Verified: 1.845 kWh → service=16.605 → GST=2.988 → total=19.593 ≈ ₹19.59 ✓
   function chargemodCost(kwh) {
     const service = parseFloat((kwh * 9).toFixed(2));
     const gst     = parseFloat((service * 0.18).toFixed(2));
     const total   = parseFloat((service + gst).toFixed(2));
     return { energy: 0, service, gst, total };
   }
- 
+
   // ─── Battery capacity ──────────────────────────────────────────────────────
   function getCarCapacity() {
     return parseFloat(localStorage.getItem('ev_battery_capacity') || '3.97');
   }
- 
-  // ─── Calibration ───────────────────────────────────────────────────────────
-  function getCalibration() {
-    return {
-      start: parseFloat(localStorage.getItem('ev_calib_start') || '47'),
-      end: parseFloat(localStorage.getItem('ev_calib_end') || '100'),
-      h: parseFloat(localStorage.getItem('ev_calib_h') || '3'),
-      m: parseFloat(localStorage.getItem('ev_calib_m') || '7')
-    };
-  }
- 
-  window.saveCalibration = function() {
-    const s = parseFloat(document.getElementById('calib_start').value);
-    const e = parseFloat(document.getElementById('calib_end').value);
-    const h = parseFloat(document.getElementById('calib_h').value);
-    const m = parseFloat(document.getElementById('calib_m').value);
-    
-    if (isNaN(s) || isNaN(e) || isNaN(h) || isNaN(m) || e <= s) {
-      showToast('Invalid calibration values', 'error');
-      return;
-    }
-    
-    localStorage.setItem('ev_calib_start', s);
-    localStorage.setItem('ev_calib_end', e);
-    localStorage.setItem('ev_calib_h', h);
-    localStorage.setItem('ev_calib_m', m);
-    showToast('Calibration saved! ⏱️', 'success');
-    previewCost();
-  };
- 
-  function calculateHomeDuration(startPct, endPct) {
-    const cal = getCalibration();
-    const refDiff = cal.end - cal.start;
-    if (refDiff <= 0) return 0;
-    const refMins = (cal.h * 60) + cal.m;
-    const minsPerPct = refMins / refDiff;
-    
-    const currentDiff = endPct - startPct;
-    if (currentDiff <= 0) return 0;
-    return Math.round(currentDiff * minsPerPct);
-  }
- 
+
   // kWh from % range — OR use manual kWh entry if provided
   function getKwh() {
     const method = document.getElementById('inp_method').value;
@@ -112,26 +62,25 @@
     const cap = getCarCapacity();
     return parseFloat(((endPct - startPct) / 100 * cap).toFixed(3));
   }
- 
-  // ─── Save session ──────────────────────────────────────────────────────────
-  window.currentEditId = null;
 
+  // ─── Save session ──────────────────────────────────────────────────────────
   window.saveSession = async function() {
     const method   = document.getElementById('inp_method').value;
     const date     = document.getElementById('inp_date').value;
     const startPct = parseFloat(document.getElementById('inp_start').value);
     const endPct   = parseFloat(document.getElementById('inp_end').value);
+    const tariff   = document.getElementById('inp_tariff').value;
     const note     = document.getElementById('inp_note').value.trim();
     const timeStart = document.getElementById('inp_time_start').value;
     const timeEnd   = document.getElementById('inp_time_end').value;
- 
+
     const kwh = getKwh();
     if (!date || kwh === null || kwh <= 0) {
-      if (method === 'home') showToast('Enter valid Start % and End %.', 'error');
-      else showToast('Enter the kWh used.', 'error');
+      if (method === 'home') showToast('Enter valid Start % and End % (end must be higher).', 'error');
+      else showToast('Enter the kWh used from your ChargeMOD invoice/app.', 'error');
       return;
     }
- 
+
     let cost = {};
     if (method === 'home') {
       const amt = ksebCost(kwh);
@@ -139,8 +88,6 @@
     } else {
       cost = chargemodCost(kwh);
     }
- 
-    const oldSession = window.currentEditId ? window._sessions.find(x => x.id === window.currentEditId) : null;
 
     const session = {
       method, date, startPct: startPct||null, endPct: endPct||null, kwh,
@@ -148,13 +95,6 @@
       service: cost.service, gst: cost.gst,
       tariff: method === 'home' ? 'KSEB' : 'NS (₹9/kWh)',
       duration: (() => {
-        if (method === 'home') {
-          if (!startPct || !endPct) return '—';
-          const totalMins = calculateHomeDuration(startPct, endPct);
-          const h = Math.floor(totalMins / 60);
-          const m = totalMins % 60;
-          return `${h}h ${m}m`;
-        }
         if (!timeStart || !timeEnd) return '—';
         const [sh,sm] = timeStart.split(':').map(Number);
         const [eh,em] = timeEnd.split(':').map(Number);
@@ -162,31 +102,24 @@
         if (diff < 0) diff += 24*60;
         return `${Math.floor(diff/60)}h ${diff%60}m`;
       })(),
-      timeStart: method === 'home' ? '' : timeStart,
-      timeEnd: method === 'home' ? '' : timeEnd,
+      timeStart, timeEnd,
       note,
-      createdAt: oldSession ? oldSession.createdAt : new Date().toISOString()
+      createdAt: new Date().toISOString()
     };
- 
+
     try {
-      showBtn('Saving...');
-      if (window.currentEditId) {
-        await updateDoc(doc(db, 'ev_sessions', window.currentEditId), session);
-        showToast('Session updated! ⚡', 'success');
-      } else {
-        await addDoc(collection(db, 'ev_sessions'), session);
-        showToast('Session saved! ⚡', 'success');
-      }
+      showBtn('saving...');
+      await addDoc(collection(db, 'ev_sessions'), session);
+      showToast('Session saved! ⚡', 'success');
       clearForm();
       await loadAll();
-      switchTab('dashboard'); // Auto redirect to dashboard
     } catch(e) {
       showToast('Save failed: ' + e.message, 'error');
     } finally {
-      showBtn(window.currentEditId ? 'Update Session' : 'Save Session');
+      showBtn('Add Session');
     }
   };
- 
+
   window.deleteSession = async function(id) {
     if (!confirm('Delete this session?')) return;
     try {
@@ -196,40 +129,6 @@
     } catch(e) {
       showToast('Delete failed: ' + e.message, 'error');
     }
-  };
- 
-  window.editSession = function(id) {
-    const s = window._sessions.find(x => x.id === id);
-    if (!s) return;
-    
-    window.currentEditId = id;
-    document.getElementById('inp_method').value = s.method;
-    document.getElementById('inp_date').value = s.date;
-    
-    if (s.method === 'home') {
-      document.getElementById('inp_start').value = s.startPct || '';
-      document.getElementById('inp_end').value = s.endPct || '';
-      document.getElementById('inp_kwh_direct').value = '';
-    } else {
-      document.getElementById('inp_start').value = '';
-      document.getElementById('inp_end').value = '';
-      document.getElementById('inp_kwh_direct').value = s.kwh || '';
-    }
-    
-    document.getElementById('inp_time_start').value = s.timeStart || '';
-    document.getElementById('inp_time_end').value = s.timeEnd || '';
-    document.getElementById('inp_note').value = s.note || '';
-    
-    // Update top toggle buttons styling manually
-    document.getElementById('btn_home').className = s.method === 'home' ? 'method-btn active-home' : 'method-btn';
-    document.getElementById('btn_out').className = s.method === 'outside' ? 'method-btn active-out' : 'method-btn';
-    
-    toggleMethod();
-    previewCost();
-    
-    document.getElementById('save_btn').textContent = 'Update Session';
-    switchTab('add');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // ─── Load & render ─────────────────────────────────────────────────────────
@@ -247,12 +146,12 @@
       showToast('Load failed: ' + e.message, 'error');
     }
   };
- 
+
   function renderDashboard(sessions) {
     const now = new Date();
     const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
     const monthly = sessions.filter(s => s.date.startsWith(thisMonth));
- 
+
     const totalKwh   = sessions.reduce((a,s) => a + (s.kwh || 0), 0);
     const totalCost  = sessions.reduce((a,s) => a + (s.cost || 0), 0);
     const homeKwh    = sessions.filter(s=>s.method==='home').reduce((a,s)=>a+(s.kwh||0),0);
@@ -261,7 +160,7 @@
     const outCost    = sessions.filter(s=>s.method==='outside').reduce((a,s)=>a+(s.cost||0),0);
     const mKwh       = monthly.reduce((a,s)=>a+(s.kwh||0),0);
     const mCost      = monthly.reduce((a,s)=>a+(s.cost||0),0);
- 
+
     setEl('stat_total_kwh', totalKwh.toFixed(2) + ' kWh');
     setEl('stat_total_cost', '₹' + totalCost.toFixed(2));
     setEl('stat_home_kwh', homeKwh.toFixed(2) + ' kWh');
@@ -274,86 +173,57 @@
     const avg = sessions.length ? (totalCost / totalKwh).toFixed(2) : '0';
     setEl('stat_avg_rate', '₹' + avg + '/kWh');
   }
- 
+
   function renderTable(sessions) {
     const tbody = document.getElementById('sessions_tbody');
     if (!sessions.length) {
       tbody.innerHTML = `<tr><td colspan="8" class="empty-row">No sessions yet. Add your first charge!</td></tr>`;
       return;
     }
-    // Added data-labels to each td to support mobile responsive card layout
     tbody.innerHTML = sessions.map(s => `
       <tr class="session-row ${s.method}">
-        <td data-label="Method"><span class="badge ${s.method}">${s.method === 'home' ? '🏠 Home' : '⚡ Outside'}</span></td>
-        <td data-label="Date">${formatDate(s.date)}</td>
-        <td data-label="Battery" class="mono">${s.method==='home' ? (s.startPct+'% → '+s.endPct+'%') : '—'}</td>
-        <td data-label="Energy" class="mono">${(s.kwh||0).toFixed(3)} kWh</td>
-        <td data-label="Tariff" class="mono">${s.tariff || '—'}</td>
-        <td data-label="Time" class="mono">${s.timeStart && s.timeEnd ? s.timeStart+' – '+s.timeEnd : (s.duration||'—')}</td>
-        <td data-label="Cost" class="mono cost">₹${(s.cost||0).toFixed(2)}</td>
-        <td data-label="Action" class="action-cell">
-          <button class="edit-btn" onclick="editSession('${s.id}')">✎ Edit</button>
-          <button class="del-btn" onclick="deleteSession('${s.id}')">✕ Delete</button>
-        </td>
+        <td><span class="badge ${s.method}">${s.method === 'home' ? '🏠 Home' : '⚡ Outside'}</span></td>
+        <td>${formatDate(s.date)}</td>
+        <td class="mono">${s.method==='home' ? (s.startPct+'% → '+s.endPct+'%') : '—'}</td>
+        <td class="mono">${(s.kwh||0).toFixed(3)} kWh</td>
+        <td class="mono">${s.tariff || '—'}</td>
+        <td class="mono">${s.timeStart && s.timeEnd ? s.timeStart+' – '+s.timeEnd : (s.duration||'—')}</td>
+        <td class="mono cost">₹${(s.cost||0).toFixed(2)}</td>
+        <td><button class="del-btn" onclick="deleteSession('${s.id}')">✕</button></td>
       </tr>
     `).join('');
   }
- 
-  window.renderReports = function(sessions) {
-    if (!sessions) sessions = window._sessions || [];
+
+  function renderReports(sessions) {
     const now = new Date();
-    
-    const elWeek = document.getElementById('filter_week');
-    const elMonth = document.getElementById('filter_month');
-    const elYear = document.getElementById('filter_year');
 
-    if (!elWeek || !elMonth || !elYear) return;
-
-    if (!elWeek.value) {
-      const y = now.getFullYear(), m = String(now.getMonth() + 1).padStart(2, '0'), d = String(now.getDate()).padStart(2, '0');
-      elWeek.value = `${y}-${m}-${d}`;
-    }
-    if (!elMonth.value) elMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    if (!elYear.value) elYear.value = now.getFullYear();
- 
     // ── Weekly ──────────────────────────────────────────
-    const parts = elWeek.value.split('-');
-    const selectedWeekDate = new Date(parts[0], parts[1] - 1, parts[2]);
-    const weekStart = new Date(selectedWeekDate);
-    weekStart.setDate(selectedWeekDate.getDate() - selectedWeekDate.getDay());
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 6);
-    
-    const sy = weekStart.getFullYear(), sm = String(weekStart.getMonth()+1).padStart(2,'0'), sd = String(weekStart.getDate()).padStart(2,'0');
-    const ey = weekEnd.getFullYear(), em = String(weekEnd.getMonth()+1).padStart(2,'0'), ed = String(weekEnd.getDate()).padStart(2,'0');
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay());
+    const weekly = sessions.filter(s => new Date(s.date) >= weekStart);
+    buildReport('report_weekly', weekly, 'This Week');
 
-    const weekStartStr = `${sy}-${sm}-${sd}`;
-    const weekEndStr = `${ey}-${em}-${ed}`;
-
-    const weekly = sessions.filter(s => s.date >= weekStartStr && s.date <= weekEndStr);
-    buildReport('report_weekly', weekly, `Week: ${formatDate(weekStartStr)} – ${formatDate(weekEndStr)}`);
- 
     // ── Monthly ─────────────────────────────────────────
-    const monthly = sessions.filter(s => s.date.startsWith(elMonth.value));
-    const monthParts = elMonth.value.split('-');
-    const monthDate = new Date(monthParts[0], monthParts[1]-1, 1);
-    const monthLabel = monthDate.toLocaleString('default',{month:'long',year:'numeric'});
-    buildReport('report_monthly', monthly, `Month: ${monthLabel}`);
- 
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const monthly = sessions.filter(s => s.date.startsWith(thisMonth));
+    buildReport('report_monthly', monthly, now.toLocaleString('default',{month:'long',year:'numeric'}));
+
     // ── Yearly ──────────────────────────────────────────
-    const yearly = sessions.filter(s => s.date.startsWith(elYear.value.toString()));
-    buildReport('report_yearly', yearly, `Year: ${elYear.value}`);
- 
+    const thisYear = now.getFullYear().toString();
+    const yearly = sessions.filter(s => s.date.startsWith(thisYear));
+    buildReport('report_yearly', yearly, thisYear);
+
+    // ── Monthly breakdown chart ──────────────────────────
     buildMonthlyChart(sessions);
   }
- 
+
   function buildReport(containerId, sessions, label) {
     const el = document.getElementById(containerId);
     if (!el) return;
     const home = sessions.filter(s => s.method === 'home');
     const out  = sessions.filter(s => s.method === 'outside');
     const sum  = (arr, key) => arr.reduce((a,s) => a + (s[key]||0), 0);
- 
+
     el.innerHTML = `
       <div class="report-label">${label}</div>
       <div class="report-grid">
@@ -378,121 +248,63 @@
       </div>
     `;
   }
- 
+
   function buildMonthlyChart(sessions) {
-    const canvasWrap = document.querySelector('.chart-wrap');
     const canvas = document.getElementById('monthly_chart');
-    if (!canvas || !canvasWrap) return;
-    
-    // Support Retina Displays for crisp rendering on smartphones
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvasWrap.getBoundingClientRect();
-    const W = rect.width - 48; // Account for wrapper padding
-    const H = 240; 
-    
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    canvas.style.width = `${W}px`;
-    canvas.style.height = `${H}px`;
-    
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-    
     const monthMap = {};
     sessions.forEach(s => {
       const m = s.date.substring(0,7);
       if (!monthMap[m]) monthMap[m] = { home: 0, outside: 0 };
       monthMap[m][s.method] = (monthMap[m][s.method] || 0) + (s.cost || 0);
     });
-    
     const months = Object.keys(monthMap).sort().slice(-12);
     const homeData = months.map(m => monthMap[m].home || 0);
     const outData  = months.map(m => monthMap[m].outside || 0);
- 
-    ctx.clearRect(0, 0, W, H);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!months.length) {
       ctx.fillStyle = '#aaa';
       ctx.font = '14px DM Mono';
-      ctx.textAlign = 'center';
-      ctx.fillText('No data yet', W/2, H/2);
+      ctx.fillText('No data yet', canvas.width/2 - 40, canvas.height/2);
       return;
     }
- 
-    const pad = { l: 45, r: 10, t: 30, b: 30 }; // Extra top padding for value labels
+
+    const W = canvas.width, H = canvas.height;
+    const pad = { l:50, r:20, t:20, b:50 };
     const chartW = W - pad.l - pad.r;
     const chartH = H - pad.t - pad.b;
     const maxVal = Math.max(...months.map(m => (monthMap[m].home||0)+(monthMap[m].outside||0)), 1);
     const barW = chartW / months.length;
-    
-    // Draw horizontal grid lines for clarity
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    [0, 0.25, 0.5, 0.75, 1].forEach(t => {
-      const y = pad.t + chartH * (1 - t);
-      ctx.moveTo(pad.l, y);
-      ctx.lineTo(W - pad.r, y);
-    });
-    ctx.stroke();
- 
-    // Draw bars & Labels
+
+    // draw bars
     months.forEach((m, i) => {
-      const x = pad.l + i * barW + (barW * 0.15);
-      const bw = barW * 0.7; // Thinner bars for better spacing
-      const hVal = homeData[i];
-      const oVal = outData[i];
-      const totalVal = hVal + oVal;
-      
-      const hh = (hVal / maxVal) * chartH;
-      const oh = (oVal / maxVal) * chartH;
-      
-      // Outside (bottom chunk)
-      if (oh > 0) {
-        ctx.fillStyle = '#f97316';
-        ctx.fillRect(x, pad.t + chartH - oh, bw, oh);
-      }
-      // Home (top chunk)
-      if (hh > 0) {
-        ctx.fillStyle = '#22c55e';
-        // Give the top part rounded corners if possible
-        ctx.beginPath();
-        ctx.roundRect(x, pad.t + chartH - oh - hh, bw, hh, [4, 4, 0, 0]);
-        ctx.fill();
-      }
-      
-      // Values strictly above the bar (Enhancing clarity!)
-      if (totalVal > 0) {
-        ctx.fillStyle = '#e2e8f0';
-        ctx.font = '600 10px DM Mono';
-        ctx.textAlign = 'center';
-        ctx.fillText('₹' + Math.round(totalVal), x + bw/2, pad.t + chartH - oh - hh - 6);
-      }
-      
-      // X-axis Month Label
+      const x = pad.l + i * barW + barW * 0.1;
+      const bw = barW * 0.8;
+      const hh = (homeData[i] / maxVal) * chartH;
+      const oh = (outData[i] / maxVal) * chartH;
+      // outside (bottom)
+      ctx.fillStyle = '#f97316';
+      ctx.fillRect(x, pad.t + chartH - oh, bw, oh);
+      // home (on top)
+      ctx.fillStyle = '#22c55e';
+      ctx.fillRect(x, pad.t + chartH - oh - hh, bw, hh);
+      // label
       ctx.fillStyle = '#94a3b8';
       ctx.font = '10px DM Mono';
-      ctx.textAlign = 'center';
-      const shortMonth = new Date(m + '-01').toLocaleString('en', {month: 'short'});
-      ctx.fillText(shortMonth, x + bw/2, H - pad.b + 18);
+      ctx.fillText(m.substring(5), x + bw/2 - 10, H - pad.b + 16);
     });
- 
+
     // Y axis labels
     ctx.fillStyle = '#64748b';
     ctx.font = '10px DM Mono';
-    ctx.textAlign = 'left';
     [0, 0.25, 0.5, 0.75, 1].forEach(t => {
       const y = pad.t + chartH * (1 - t);
       ctx.fillText('₹' + Math.round(maxVal * t), 0, y + 4);
     });
   }
- 
-  // Redraw chart on resize to prevent squishing
-  window.addEventListener('resize', () => {
-    if (document.getElementById('tab_dashboard').classList.contains('active') && window._sessions) {
-      buildMonthlyChart(window._sessions);
-    }
-  });
- 
+
   // ─── Helpers ───────────────────────────────────────────────────────────────
   function setEl(id, val) { const e = document.getElementById(id); if(e) e.textContent = val; }
   function formatDate(d) { return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', {day:'numeric',month:'short',year:'numeric'}); }
@@ -509,22 +321,21 @@
       if (el) el.value = '';
     });
     document.getElementById('cost_preview').textContent = '';
-    window.currentEditId = null;
-    document.getElementById('save_btn').textContent = 'Save Session';
   }
- 
+
   // ─── Method toggle ─────────────────────────────────────────────────────────
   window.toggleMethod = function() {
     const method = document.getElementById('inp_method').value;
+    // Notes
     document.getElementById('kseb_note').style.display  = method === 'home'    ? 'block' : 'none';
     document.getElementById('out_note').style.display   = method === 'outside' ? 'block' : 'none';
+    // Home: show % inputs, hide direct kWh
     document.getElementById('row_pct').style.display    = method === 'home'    ? 'flex'  : 'none';
+    // Outside: show direct kWh, hide % inputs
     document.getElementById('row_kwh').style.display    = method === 'outside' ? 'flex'  : 'none';
-    const rowTimes = document.getElementById('row_times');
-    if (rowTimes) rowTimes.style.display = method === 'home' ? 'none' : 'flex';
     previewCost();
   };
- 
+
   // ─── Settings ──────────────────────────────────────────────────────────────
   window.saveBattery = function() {
     const v = parseFloat(document.getElementById('battery_cap').value);
@@ -532,140 +343,106 @@
     localStorage.setItem('ev_battery_capacity', v);
     showToast(`Battery set to ${v} kWh`, 'success');
   };
- 
+
+  const TAB_ORDER = ['dashboard', 'add', 'sessions', 'reports', 'settings'];
+
   window.switchTab = function(tab) {
+    const idx = TAB_ORDER.indexOf(tab);
+    if (idx === -1) return;
+
+    // Top tabs (desktop)
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    const topBtn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+    if (topBtn) topBtn.classList.add('active');
+
+    // Bottom nav (mobile)
+    document.querySelectorAll('.bottom-nav .nav-item').forEach(b => b.classList.remove('active'));
+    const botBtn = document.querySelector(`.bottom-nav .nav-item[data-tab="${tab}"]`);
+    if (botBtn) botBtn.classList.add('active');
+
+    // Pane active class (for desktop display:none/block)
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-    document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
     document.getElementById('tab_' + tab).classList.add('active');
-    
-    // Re-render chart if switching to dashboard to fix canvas scaling issues
-    if (tab === 'dashboard' && window._sessions) {
-      setTimeout(() => buildMonthlyChart(window._sessions), 50);
-    }
+
+    // Slide the slider (mobile)
+    const slider = document.getElementById('tabs_slider');
+    if (slider) slider.style.transform = `translateX(-${idx * 100}vw)`;
+
+    window._currentTabIdx = idx;
   };
- 
+
+  // ─── Swipe gesture ─────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    window._currentTabIdx = 0;
+    const viewport = document.querySelector('.tabs-viewport');
+    if (!viewport) return;
+
+    let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+    let isDragging = false;
+
+    viewport.addEventListener('touchstart', e => {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      touchStartTime = Date.now();
+      isDragging = false;
+    }, { passive: true });
+
+    viewport.addEventListener('touchmove', e => {
+      const dx = e.touches[0].clientX - touchStartX;
+      const dy = e.touches[0].clientY - touchStartY;
+      // Only hijack horizontal swipes (dx dominant)
+      if (!isDragging && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
+        isDragging = true;
+      }
+    }, { passive: true });
+
+    viewport.addEventListener('touchend', e => {
+      if (!isDragging) return;
+      const dx = e.changedTouches[0].clientX - touchStartX;
+      const dt = Date.now() - touchStartTime;
+      const isFlick = Math.abs(dx) > 40 || (Math.abs(dx) > 20 && dt < 250);
+      if (!isFlick) return;
+
+      const cur = window._currentTabIdx || 0;
+      if (dx < 0 && cur < TAB_ORDER.length - 1) {
+        // swipe left → next tab
+        switchTab(TAB_ORDER[cur + 1]);
+      } else if (dx > 0 && cur > 0) {
+        // swipe right → prev tab
+        switchTab(TAB_ORDER[cur - 1]);
+      }
+      isDragging = false;
+    }, { passive: true });
+  });
+
   // ─── Preview cost live ─────────────────────────────────────────────────────
   window.previewCost = function() {
     const method  = document.getElementById('inp_method').value;
     const previewEl = document.getElementById('cost_preview');
     const kwh = getKwh();
     if (!kwh || kwh <= 0) { previewEl.textContent = ''; return; }
- 
+
     let txt = '';
     if (method === 'home') {
-      let timeStr = "";
-      const startPct = parseFloat(document.getElementById('inp_start').value);
-      const endPct = parseFloat(document.getElementById('inp_end').value);
-      if (!isNaN(startPct) && !isNaN(endPct) && endPct > startPct) {
-        const totalMins = calculateHomeDuration(startPct, endPct);
-        const h = Math.floor(totalMins / 60);
-        const m = totalMins % 60;
-        timeStr = ` • ⏱️ Auto Time: ${h}h ${m}m`;
-      }
-      txt = `${kwh.toFixed(3)} kWh → ₹${ksebCost(kwh).toFixed(2)} (KSEB)${timeStr}`;
+      txt = `${kwh.toFixed(3)} kWh → ₹${ksebCost(kwh).toFixed(2)} (KSEB slab rate)`;
     } else {
       const c = chargemodCost(kwh);
-      txt = `${kwh.toFixed(3)} kWh → Ser. ₹${c.service.toFixed(2)} + GST ₹${c.gst.toFixed(2)} = ₹${c.total.toFixed(2)}`;
+      txt = `${kwh.toFixed(3)} kWh → Service ₹${c.service.toFixed(2)} + GST ₹${c.gst.toFixed(2)} = ₹${c.total.toFixed(2)}`;
     }
     previewEl.textContent = '≈ ' + txt;
-  };
- 
-  // ─── PWA & Installability ──────────────────────────────────────────────────
-  let deferredPrompt;
-
-  function setupPWA() {
-    // 1. Inject Manifest dynamically
-    const manifest = {
-      name: "EV Charge Tracker",
-      short_name: "EV Track",
-      description: "Kerala EV Charge Monitor",
-      start_url: "./",
-      display: "standalone",
-      background_color: "#0a0f1e",
-      theme_color: "#0a0f1e",
-      icons: [{
-        src: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEzIDJMMyAxNGg5bC0xIDhsMTAtMTJoLTlsMS04eiIvPjwvc3ZnPg==",
-        sizes: "192x192",
-        type: "image/svg+xml"
-      }, {
-        src: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEzIDJMMyAxNGg5bC0xIDhsMTAtMTJoLTlsMS04eiIvPjwvc3ZnPg==",
-        sizes: "512x512",
-        type: "image/svg+xml"
-      }]
-    };
-    const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/manifest+json'});
-    const link = document.createElement('link');
-    link.rel = 'manifest';
-    link.href = URL.createObjectURL(manifestBlob);
-    document.head.appendChild(link);
-
-    // 2. Register Service Worker (will activate when hosted)
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').then(reg => {
-        console.log('SW Registered');
-      }).catch(err => {
-        console.log('SW fetch failed (expected in Canvas). Use the Export PWA files button to host locally.');
-      });
-    }
-
-    // 3. Handle Install Prompt
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      deferredPrompt = e;
-      const btn = document.getElementById('install_app_btn');
-      if (btn) btn.style.display = 'block';
-    });
-  }
-
-  window.installPWA = async function() {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') {
-        document.getElementById('install_app_btn').style.display = 'none';
-      }
-      deferredPrompt = null;
-    }
-  };
-
-  window.exportPWA = function() {
-    // Export Manifest
-    const manifestStr = `{\n  "name": "EV Charge Tracker",\n  "short_name": "EV Track",\n  "start_url": "./",\n  "display": "standalone",\n  "background_color": "#0a0f1e",\n  "theme_color": "#0a0f1e",\n  "icons": [\n    {\n      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEzIDJMMyAxNGg5bC0xIDhsMTAtMTJoLTlsMS04eiIvPjwvc3ZnPg==",\n      "sizes": "192x192",\n      "type": "image/svg+xml"\n    },\n    {\n      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlNWZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEzIDJMMyAxNGg5bC0xIDhsMTAtMTJoLTlsMS04eiIvPjwvc3ZnPg==",\n      "sizes": "512x512",\n      "type": "image/svg+xml"\n    }\n  ]\n}`;
-    const a1 = document.createElement('a');
-    a1.href = URL.createObjectURL(new Blob([manifestStr], {type: 'application/json'}));
-    a1.download = 'manifest.json';
-    a1.click();
-
-    // Export SW
-    const swStr = `self.addEventListener('install', (e) => { self.skipWaiting(); });\nself.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });\nself.addEventListener('fetch', (e) => { /* Add offline caching here if needed */ });`;
-    const a2 = document.createElement('a');
-    a2.href = URL.createObjectURL(new Blob([swStr], {type: 'application/javascript'}));
-    a2.download = 'sw.js';
-    setTimeout(() => a2.click(), 500);
-    
-    showToast('PWA files downloaded! 📦', 'success');
   };
 
   // ─── Boot ──────────────────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', async () => {
-    setupPWA();
     const cap = localStorage.getItem('ev_battery_capacity') || '3.97';
     const capEl = document.getElementById('battery_cap');
     if (capEl) capEl.value = cap;
-    
-    const cal = getCalibration();
-    const elS = document.getElementById('calib_start'); if (elS) elS.value = cal.start;
-    const elE = document.getElementById('calib_end');   if (elE) elE.value = cal.end;
-    const elH = document.getElementById('calib_h');     if (elH) elH.value = cal.h;
-    const elM = document.getElementById('calib_m');     if (elM) elM.value = cal.m;
- 
     document.getElementById('inp_date').value = new Date().toISOString().split('T')[0];
     toggleMethod();
     await loadAll();
   });
 </script>
- 
+
 <style>
   :root {
     --bg: #0a0f1e;
@@ -681,9 +458,9 @@
     --out: #f97316;
     --card-shadow: 0 4px 24px rgba(0,229,255,0.07);
   }
- 
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
- 
+
   body {
     background: var(--bg);
     color: var(--text);
@@ -691,36 +468,29 @@
     min-height: 100vh;
     background-image: radial-gradient(ellipse at 20% 10%, rgba(0,229,255,0.04) 0%, transparent 60%),
                       radial-gradient(ellipse at 80% 80%, rgba(249,115,22,0.04) 0%, transparent 60%);
-    /* Padding to accommodate bottom nav on mobile */
-    padding-bottom: 0; 
   }
- 
+
   /* ─── Header ─────────────────────────────────── */
   .header {
-    padding: 24px 24px 16px;
+    padding: 32px 24px 20px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 12px;
-    position: sticky;
-    top: 0;
-    background: rgba(10, 15, 30, 0.9);
-    backdrop-filter: blur(12px);
-    z-index: 50;
   }
-  .header-left { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .header-left { display: flex; align-items: baseline; gap: 16px; }
   .logo {
     font-family: 'Syne', sans-serif;
-    font-size: 1.5rem;
+    font-size: 1.7rem;
     font-weight: 800;
     letter-spacing: -1px;
     color: var(--accent);
   }
   .logo span { color: var(--accent2); }
   .header-sub {
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     color: var(--muted);
     letter-spacing: 2px;
     text-transform: uppercase;
@@ -729,23 +499,20 @@
     background: var(--bg3);
     border: 1px solid var(--border);
     border-radius: 100px;
-    padding: 6px 14px;
-    font-size: 0.7rem;
+    padding: 6px 16px;
+    font-size: 0.75rem;
     color: var(--muted);
   }
   .user-pill strong { color: var(--accent); }
- 
-  /* ─── Tabs / Bottom Nav ─────────────────────── */
+
+  /* ─── Tabs ──────────────────────────────────── */
   .tabs {
     display: flex;
     gap: 4px;
     padding: 16px 24px 0;
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
-    scrollbar-width: none; /* Firefox */
   }
-  .tabs::-webkit-scrollbar { display: none; } /* Chrome */
-  
   .tab-btn {
     background: transparent;
     border: none;
@@ -755,69 +522,62 @@
     font-weight: 600;
     letter-spacing: 1px;
     text-transform: uppercase;
-    padding: 12px 20px;
+    padding: 10px 20px;
     cursor: pointer;
     border-bottom: 2px solid transparent;
     transition: all 0.2s;
     white-space: nowrap;
-    display: flex;
-    align-items: center;
-    gap: 8px;
   }
-  .tab-icon { font-size: 1.1rem; }
   .tab-btn:hover { color: var(--text); }
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
- 
+
   /* ─── Tab content ───────────────────────────── */
-  .tab-pane { display: none; padding: 24px; max-width: 1200px; margin: 0 auto;}
-  .tab-pane.active { display: block; animation: fadeIn 0.3s ease; }
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
- 
+  .tab-pane { display: none; padding: 28px 24px; }
+  .tab-pane.active { display: block; }
+
   /* ─── Stat cards ────────────────────────────── */
   .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 16px;
     margin-bottom: 32px;
   }
   .stat-card {
     background: var(--bg2);
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: 14px;
     padding: 20px;
     position: relative;
     overflow: hidden;
     transition: transform 0.2s;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
   }
-  .stat-card:hover { transform: translateY(-2px); border-color: rgba(0,229,255,0.3); }
+  .stat-card:hover { transform: translateY(-2px); }
   .stat-card::before {
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 3px;
+    height: 2px;
     background: var(--accent);
   }
   .stat-card.home-type::before { background: var(--home); }
   .stat-card.out-type::before  { background: var(--out); }
   .stat-card.month-type::before { background: linear-gradient(90deg,var(--accent),var(--out)); }
- 
-  .stat-label { font-size: 0.7rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; font-weight: 600;}
-  .stat-val   { font-size: 1.6rem; font-weight: 500; color: var(--text); line-height: 1; }
-  .stat-sub   { font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
- 
+
+  .stat-label { font-size: 0.65rem; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px; }
+  .stat-val   { font-size: 1.5rem; font-weight: 500; color: var(--text); line-height: 1; }
+  .stat-sub   { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
+
   /* ─── Form ──────────────────────────────────── */
   .form-card {
     background: var(--bg2);
     border: 1px solid var(--border);
-    border-radius: 20px;
+    border-radius: 18px;
     padding: 28px;
     max-width: 620px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.15);
   }
   .form-title {
     font-family: 'Syne', sans-serif;
-    font-size: 1.1rem;
+    font-size: 1rem;
     font-weight: 700;
     color: var(--accent);
     letter-spacing: 1px;
@@ -836,451 +596,416 @@
   .form-group {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     flex: 1;
-    min-width: 140px;
+    min-width: 120px;
   }
   .form-group label {
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     color: var(--muted);
-    letter-spacing: 1px;
+    letter-spacing: 1.5px;
     text-transform: uppercase;
-    font-weight: 600;
   }
   .form-group input,
   .form-group select {
     background: var(--bg3);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 8px;
     color: var(--text);
     font-family: 'DM Mono', monospace;
-    font-size: 1rem;
-    padding: 14px 16px;
+    font-size: 0.9rem;
+    padding: 10px 14px;
     outline: none;
-    transition: all 0.2s;
+    transition: border-color 0.2s;
     width: 100%;
-    /* Increase touch target */
-    min-height: 48px;
   }
   .form-group input:focus,
-  .form-group select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,229,255,0.1); }
- 
+  .form-group select:focus { border-color: var(--accent); }
+
   .toggle-row {
     display: flex;
     gap: 12px;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
   }
   .method-btn {
     flex: 1;
-    padding: 16px;
+    padding: 14px;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 12px;
     background: var(--bg3);
     color: var(--muted);
-    font-family: 'Syne', sans-serif;
-    font-size: 0.85rem;
-    font-weight: 700;
-    letter-spacing: 1px;
-    cursor: pointer;
-    transition: all 0.2s;
-    text-transform: uppercase;
-    min-height: 52px;
-  }
-  .method-btn.active-home { border-color: var(--home); color: var(--home); background: rgba(34,197,94,0.1); }
-  .method-btn.active-out  { border-color: var(--out);  color: var(--out);  background: rgba(249,115,22,0.1); }
- 
-  .kseb-note {
-    background: rgba(34,197,94,0.07);
-    border: 1px solid rgba(34,197,94,0.2);
-    border-radius: 12px;
-    padding: 14px 16px;
-    font-size: 0.75rem;
-    color: #86efac;
-    line-height: 1.6;
-    margin-bottom: 20px;
-  }
- 
-  .cost-preview {
-    font-size: 0.9rem;
-    color: var(--accent);
-    min-height: 24px;
-    margin-bottom: 24px;
-    font-weight: 500;
-  }
- 
-  .save-btn {
-    background: var(--accent);
-    color: #0a0f1e;
-    border: none;
-    border-radius: 12px;
-    font-family: 'Syne', sans-serif;
-    font-size: 0.9rem;
-    font-weight: 800;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    padding: 16px 32px;
-    cursor: pointer;
-    transition: all 0.2s;
-    width: 100%;
-    min-height: 54px;
-  }
-  .save-btn:hover { opacity: 0.9; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,229,255,0.2); }
- 
-  /* ─── Sessions table ────────────────────────── */
-  .section-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 0.9rem;
-    font-weight: 700;
-    color: var(--muted);
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    margin-bottom: 20px;
-    margin-top: 10px;
-  }
-  .table-wrap {
-    overflow-x: auto;
-    border-radius: 16px;
-    border: 1px solid var(--border);
-    background: var(--bg2);
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
-  }
-  thead th {
-    background: var(--bg3);
-    color: var(--muted);
-    font-size: 0.65rem;
-    font-weight: 600;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    padding: 16px;
-    text-align: left;
-    border-bottom: 1px solid var(--border);
-    white-space: nowrap;
-  }
-  tbody tr { border-bottom: 1px solid rgba(30,58,95,0.4); transition: background 0.2s; }
-  tbody tr:hover { background: rgba(30,58,95,0.2); }
-  tbody td { padding: 16px; vertical-align: middle; }
-  .mono { font-family: 'DM Mono', monospace; }
-  .cost { color: var(--accent); font-weight: 500; font-size: 0.95rem;}
-  .empty-row { text-align: center; color: var(--muted); padding: 40px !important; }
- 
-  .badge {
-    font-size: 0.65rem;
-    font-weight: 700;
-    padding: 6px 12px;
-    border-radius: 100px;
-    letter-spacing: 0.5px;
-    display: inline-block;
-  }
-  .badge.home    { background: rgba(34,197,94,0.15);  color: var(--home); border: 1px solid rgba(34,197,94,0.3); }
-  .badge.outside { background: rgba(249,115,22,0.15); color: var(--out);  border: 1px solid rgba(249,115,22,0.3); }
- 
-  .action-cell { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
-
-  .edit-btn {
-    background: transparent;
-    border: 1px solid rgba(0,229,255,0.3);
-    color: var(--accent);
-    border-radius: 8px;
-    cursor: pointer;
-    padding: 8px 12px;
-    font-size: 0.75rem;
-    transition: all 0.2s;
-    font-weight: 500;
-  }
-  .edit-btn:hover { background: rgba(0,229,255,0.1); border-color: var(--accent); }
-
-  .del-btn {
-    background: transparent;
-    border: 1px solid rgba(239,68,68,0.3);
-    color: #ef4444;
-    border-radius: 8px;
-    cursor: pointer;
-    padding: 8px 12px;
-    font-size: 0.75rem;
-    transition: all 0.2s;
-    font-weight: 500;
-  }
-  .del-btn:hover { background: rgba(239,68,68,0.1); border-color: #ef4444;}
- 
-  /* ─── Reports ───────────────────────────────── */
-  .report-filters {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 32px;
-    flex-wrap: wrap;
-    background: var(--bg2);
-    padding: 24px;
-    border-radius: 20px;
-    border: 1px solid var(--border);
-  }
-  .report-section { margin-bottom: 48px; }
-  .report-label {
-    font-family: 'Instrument Serif', serif;
-    font-size: 1.5rem;
-    color: var(--text);
-    margin-bottom: 20px;
-    font-style: italic;
-  }
-  .report-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 20px;
-  }
-  .report-card {
-    background: var(--bg2);
-    border-radius: 16px;
-    padding: 24px;
-    border: 1px solid var(--border);
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-  }
-  .report-card::after {
-    content: '';
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 4px;
-  }
-  .home-card::after     { background: var(--home); }
-  .out-card::after      { background: var(--out); }
-  .combined-card::after { background: linear-gradient(90deg, var(--home), var(--out)); }
- 
-  .rc-title { font-size: 0.7rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; font-weight: 600; }
-  .rc-stat  { font-size: 1.8rem; font-weight: 500; color: var(--text); }
-  .rc-stat span { font-size: 0.8rem; color: var(--muted); }
-  .rc-cost  { font-size: 1.2rem; color: var(--accent); margin-top: 8px; font-weight: 500; }
-  .rc-sub   { font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
- 
-  /* ─── Chart ─────────────────────────────────── */
-  .chart-wrap {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 24px;
-    margin-top: 32px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-  }
-  .chart-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: var(--muted);
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    margin-bottom: 24px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
-  }
-  .legend-item { display: flex; align-items: center; gap: 8px; font-family: 'DM Mono', monospace; font-size: 0.8rem;}
-  .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
-  canvas { width: 100%; height: auto; display: block; }
- 
-  /* ─── Settings ──────────────────────────────── */
-  .settings-card {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 28px;
-    max-width: 620px;
-    margin-bottom: 24px;
-  }
-  .settings-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 0.9rem;
-    font-weight: 700;
-    color: var(--accent);
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    margin-bottom: 20px;
-  }
-  .settings-row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
-  .settings-row .form-group { flex: 1; min-width: 80px; }
-  .settings-save-btn {
-    background: transparent;
-    border: 1px solid var(--accent);
-    color: var(--accent);
-    border-radius: 12px;
     font-family: 'Syne', sans-serif;
     font-size: 0.8rem;
     font-weight: 700;
     letter-spacing: 1px;
-    text-transform: uppercase;
-    padding: 12px 24px;
     cursor: pointer;
     transition: all 0.2s;
-    height: 48px;
-    margin-top: 10px;
+    text-transform: uppercase;
   }
-  .settings-save-btn:hover { background: var(--accent); color: #0a0f1e; }
- 
-  .kseb-table {
+  .method-btn.active-home { border-color: var(--home); color: var(--home); background: rgba(34,197,94,0.08); }
+  .method-btn.active-out  { border-color: var(--out);  color: var(--out);  background: rgba(249,115,22,0.08); }
+
+  .kseb-note {
+    background: rgba(34,197,94,0.07);
+    border: 1px solid rgba(34,197,94,0.2);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.72rem;
+    color: #86efac;
+    line-height: 1.6;
+    margin-bottom: 16px;
+  }
+
+  .cost-preview {
+    font-size: 0.85rem;
+    color: var(--accent);
+    min-height: 20px;
+    margin-bottom: 20px;
+    font-weight: 500;
+  }
+
+  .save-btn {
+    background: var(--accent);
+    color: #0a0f1e;
+    border: none;
+    border-radius: 10px;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 14px 32px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .save-btn:hover { opacity: 0.85; transform: translateY(-1px); }
+
+  /* ─── Sessions table ────────────────────────── */
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    margin-top: 32px;
+  }
+  .table-wrap {
+    overflow-x: auto;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+  }
+  table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.85rem;
-    margin-top: 16px;
+    font-size: 0.8rem;
   }
-  .kseb-table th {
+  thead th {
+    background: var(--bg3);
     color: var(--muted);
-    font-size: 0.65rem;
-    letter-spacing: 1px;
+    font-size: 0.62rem;
+    font-weight: 400;
+    letter-spacing: 1.5px;
     text-transform: uppercase;
     padding: 12px 16px;
     text-align: left;
     border-bottom: 1px solid var(--border);
   }
-  .kseb-table td { padding: 12px 16px; border-bottom: 1px solid rgba(30,58,95,0.3); }
-  .kseb-table td:last-child { color: var(--accent); font-weight: 500; }
- 
+  tbody tr { border-bottom: 1px solid rgba(30,58,95,0.4); transition: background 0.15s; }
+  tbody tr:hover { background: var(--bg3); }
+  tbody td { padding: 12px 16px; }
+  .mono { font-family: 'DM Mono', monospace; }
+  .cost { color: var(--accent); font-weight: 500; }
+  .empty-row { text-align: center; color: var(--muted); padding: 40px !important; }
+
+  .badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 100px;
+    letter-spacing: 0.5px;
+  }
+  .badge.home    { background: rgba(34,197,94,0.15);  color: var(--home); border: 1px solid rgba(34,197,94,0.3); }
+  .badge.outside { background: rgba(249,115,22,0.15); color: var(--out);  border: 1px solid rgba(249,115,22,0.3); }
+
+  .del-btn {
+    background: transparent;
+    border: 1px solid rgba(239,68,68,0.3);
+    color: #ef4444;
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 0.7rem;
+    transition: all 0.15s;
+  }
+  .del-btn:hover { background: rgba(239,68,68,0.1); }
+
+  /* ─── Reports ───────────────────────────────── */
+  .report-section { margin-bottom: 40px; }
+  .report-label {
+    font-family: 'Instrument Serif', serif;
+    font-size: 1.3rem;
+    color: var(--text);
+    margin-bottom: 16px;
+    font-style: italic;
+  }
+  .report-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  .report-card {
+    background: var(--bg2);
+    border-radius: 16px;
+    padding: 22px;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .report-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .home-card::after     { background: var(--home); }
+  .out-card::after      { background: var(--out); }
+  .combined-card::after { background: linear-gradient(90deg, var(--home), var(--out)); }
+
+  .rc-title { font-size: 0.65rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; }
+  .rc-stat  { font-size: 1.6rem; font-weight: 500; color: var(--text); }
+  .rc-stat span { font-size: 0.75rem; color: var(--muted); }
+  .rc-cost  { font-size: 1.1rem; color: var(--accent); margin-top: 6px; font-weight: 500; }
+  .rc-sub   { font-size: 0.65rem; color: var(--muted); margin-top: 6px; }
+
+  /* ─── Chart ─────────────────────────────────── */
+  .chart-wrap {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-top: 32px;
+  }
+  .chart-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+  canvas { width: 100%; height: 220px; }
+
+  /* ─── Settings ──────────────────────────────── */
+  .settings-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    max-width: 480px;
+    margin-bottom: 24px;
+  }
+  .settings-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .settings-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .settings-row .form-group { max-width: 200px; }
+  .settings-save-btn {
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 8px;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    height: 42px;
+  }
+  .settings-save-btn:hover { background: var(--accent); color: #0a0f1e; }
+
+  .kseb-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    margin-top: 12px;
+  }
+  .kseb-table th {
+    color: var(--muted);
+    font-size: 0.62rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .kseb-table td { padding: 8px 12px; border-bottom: 1px solid rgba(30,58,95,0.3); }
+  .kseb-table td:last-child { color: var(--accent); }
+
   /* ─── Toast ─────────────────────────────────── */
   .toast {
     position: fixed;
-    bottom: 32px; right: 24px;
+    bottom: 24px; right: 24px;
     background: var(--bg3);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px 24px;
-    font-size: 0.9rem;
+    border-radius: 10px;
+    padding: 14px 20px;
+    font-size: 0.8rem;
     color: var(--text);
-    transform: translateY(100px);
+    transform: translateY(80px);
     opacity: 0;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    z-index: 1000;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-    font-weight: 500;
+    transition: all 0.3s;
+    z-index: 999;
   }
   .toast.show { transform: translateY(0); opacity: 1; }
-  .toast.success { border-left: 4px solid var(--home); }
-  .toast.error   { border-left: 4px solid #ef4444; color: #fca5a5; }
- 
-  /* ═══════════ SMARTPHONE SPECIFIC CSS ═══════════ */
-  @media (max-width: 650px) {
-    /* Base spacing adjustments */
-    .header { padding: 16px 20px; }
-    .tab-pane { padding: 20px 16px 100px; } /* Bottom padding to clear nav bar */
-    .form-card, .chart-wrap, .report-filters, .settings-card { padding: 20px; border-radius: 16px;}
-    
-    .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
-    .stat-val { font-size: 1.3rem; }
-    
-    .toggle-row { flex-direction: column; gap: 8px;}
-    .method-btn { padding: 14px; }
+  .toast.success { border-color: var(--home); }
+  .toast.error   { border-color: #ef4444; color: #fca5a5; }
 
-    /* Sticky Bottom Navigation Bar for Mobile */
-    .tabs {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: rgba(17, 24, 39, 0.95);
-      backdrop-filter: blur(16px);
-      border-top: 1px solid var(--border);
-      border-bottom: none;
-      padding: 10px 8px;
-      /* Safe area inset support for newer iPhones */
-      padding-bottom: calc(10px + env(safe-area-inset-bottom));
-      justify-content: space-around;
-      gap: 0;
-      z-index: 100;
-    }
-    .tab-btn {
-      flex-direction: column;
-      font-size: 0.6rem;
-      padding: 8px;
-      border: none !important;
-      border-radius: 12px;
-      gap: 4px;
-      flex: 1;
-      text-transform: none;
-      letter-spacing: 0;
-      font-weight: 500;
-    }
-    .tab-btn.active { 
-      background: rgba(0, 229, 255, 0.1); 
-      color: var(--accent);
-    }
-    .tab-icon { font-size: 1.2rem; margin-bottom: 2px;}
+  @media (max-width: 600px) {
+    .form-row { flex-direction: column; }
+    .header { flex-direction: column; align-items: flex-start; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .report-grid { grid-template-columns: 1fr; }
+    /* Hide top tabs on mobile — use bottom nav instead */
+    .tabs { display: none; }
+    /* Extra bottom padding so content clears the footer nav */
+    .tab-pane { padding-bottom: 100px; }
+  }
 
-    /* Card-Based Table Layout for Mobile (No Horizontal Scrolling) */
-    .table-wrap { background: transparent; border: none; overflow: visible;}
-    table, thead, tbody, th, td, tr { display: block; }
-    thead tr { display: none; } /* Hide headers */
-    tr.session-row { 
-      margin-bottom: 16px; 
-      border: 1px solid var(--border); 
-      border-radius: 16px; 
-      background: var(--bg2);
-      padding: 4px 16px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  /* ─── Mobile Bottom Nav ───────────────────────── */
+  .bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(10,15,30,0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid var(--border);
+    padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+    z-index: 100;
+    justify-content: space-around;
+    align-items: center;
+  }
+  .bottom-nav .nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 12px;
+    transition: all 0.2s;
+    min-width: 52px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+  }
+  .bottom-nav .nav-item.active { color: var(--accent); }
+  .bottom-nav .nav-item .nav-icon {
+    font-size: 1.35rem;
+    line-height: 1;
+    transition: transform 0.2s;
+  }
+  .bottom-nav .nav-item.active .nav-icon { transform: scale(1.15); }
+  .bottom-nav .nav-item .nav-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.55rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  /* Active indicator dot */
+  .bottom-nav .nav-item::after {
+    content: '';
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity 0.2s;
+    margin-top: 1px;
+  }
+  .bottom-nav .nav-item.active::after { opacity: 1; }
+
+  @media (max-width: 600px) {
+    .bottom-nav { display: flex; }
+  }
+
+  /* ─── Swipe / slide transition ────────────────── */
+  /* Desktop: slider is invisible wrapper, normal display:none/block applies */
+  .tabs-viewport { }
+  .tabs-slider { }
+
+  /* Mobile: full-width sliding panes */
+  @media (max-width: 600px) {
+    .tabs-viewport {
+      overflow: hidden;
+      position: relative;
+      width: 100%;
     }
-    td { 
-      display: flex; 
-      justify-content: space-between; 
-      align-items: center;
-      padding: 12px 0; 
-      border: none; 
-      border-bottom: 1px solid rgba(255,255,255,0.05); 
-      text-align: right; 
+    .tabs-slider {
+      display: flex;
+      transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+      will-change: transform;
+      width: 100%;
     }
-    td::before { 
-      content: attr(data-label); 
-      color: var(--muted); 
-      text-transform: uppercase; 
-      font-size: 0.65rem; 
-      font-weight: 600;
-      letter-spacing: 1px;
-      text-align: left; 
-      font-family: 'Syne', sans-serif;
+    .tab-pane {
+      display: block !important;
+      min-width: 100vw;
+      flex-shrink: 0;
     }
-    td:last-child { border-bottom: none; }
-    
-    .edit-btn, .del-btn { padding: 10px 16px; font-size: 0.8rem; flex: 1; text-align: center;}
-    td[data-label="Action"] { display: flex; flex-direction: row; gap: 8px; padding-top: 16px; padding-bottom: 16px; justify-content: center;}
-    td[data-label="Action"]::before { display: none; }
-    
-    .toast { bottom: 90px; left: 16px; right: 16px; text-align: center; }
+    .tab-pane:not(.active) {
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .tab-pane.active {
+      visibility: visible;
+      pointer-events: auto;
+    }
   }
 </style>
 </head>
 <body>
- 
+
 <div class="header">
   <div class="header-left">
     <div class="logo">EV<span>⚡</span>Track</div>
-    <div class="header-sub">Kerala Monitor</div>
+    <div class="header-sub">Kerala EV Charge Monitor</div>
   </div>
-  <div class="user-pill"><strong>Arjun V K</strong></div>
+  <div class="user-pill">Charging as <strong>Arjun V K</strong></div>
 </div>
- 
-<!-- Mobile-friendly Bottom / Desktop Top Navigation -->
+
 <div class="tabs">
-  <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">
-    <span class="tab-icon">📊</span><span class="tab-text">Dashboard</span>
-  </button>
-  <button class="tab-btn" data-tab="add" onclick="switchTab('add')">
-    <span class="tab-icon">⚡</span><span class="tab-text">Log</span>
-  </button>
-  <button class="tab-btn" data-tab="sessions" onclick="switchTab('sessions')">
-    <span class="tab-icon">📋</span><span class="tab-text">History</span>
-  </button>
-  <button class="tab-btn" data-tab="reports" onclick="switchTab('reports')">
-    <span class="tab-icon">📈</span><span class="tab-text">Reports</span>
-  </button>
-  <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">
-    <span class="tab-icon">⚙️</span><span class="tab-text">Settings</span>
-  </button>
+  <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
+  <button class="tab-btn" data-tab="add" onclick="switchTab('add')">+ Add Session</button>
+  <button class="tab-btn" data-tab="sessions" onclick="switchTab('sessions')">All Sessions</button>
+  <button class="tab-btn" data-tab="reports" onclick="switchTab('reports')">Reports</button>
+  <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
 </div>
- 
+
+<div class="tabs-viewport">
+<div class="tabs-slider" id="tabs_slider">
+
 <!-- ═══════════ DASHBOARD ═══════════ -->
 <div id="tab_dashboard" class="tab-pane active">
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="stat-label">Total Energy</div>
+      <div class="stat-label">Total kWh Charged</div>
       <div class="stat-val" id="stat_total_kwh">—</div>
       <div class="stat-sub">All time</div>
     </div>
@@ -1300,33 +1025,37 @@
       <div class="stat-sub" id="stat_out_cost">—</div>
     </div>
     <div class="stat-card month-type">
-      <div class="stat-label">This Month</div>
+      <div class="stat-label">This Month — kWh</div>
       <div class="stat-val" id="stat_month_kwh">—</div>
       <div class="stat-sub" id="stat_month_cost">—</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Efficiency Rate</div>
+      <div class="stat-label">Total Sessions</div>
+      <div class="stat-val" id="stat_sessions">—</div>
+      <div class="stat-sub">All time</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Cost / kWh</div>
       <div class="stat-val" id="stat_avg_rate">—</div>
-      <div class="stat-sub">Blended average</div>
+      <div class="stat-sub">Blended rate</div>
     </div>
   </div>
- 
+
   <div class="chart-wrap">
     <div class="chart-title">
-      Monthly Spend Breakdown
-      <div style="flex: 1"></div>
+      Monthly Spend
       <span class="legend-item"><span class="legend-dot" style="background:var(--home)"></span>Home</span>
       <span class="legend-item"><span class="legend-dot" style="background:var(--out)"></span>Outside</span>
     </div>
-    <canvas id="monthly_chart"></canvas>
+    <canvas id="monthly_chart" width="900" height="220"></canvas>
   </div>
 </div>
- 
+
 <!-- ═══════════ ADD SESSION ═══════════ -->
 <div id="tab_add" class="tab-pane">
   <div class="form-card">
     <div class="form-title">⚡ Log Charging Session</div>
- 
+
     <div class="toggle-row">
       <button class="method-btn active-home" id="btn_home" onclick="
         document.getElementById('inp_method').value='home';
@@ -1339,25 +1068,26 @@
         this.className='method-btn active-out';
         document.getElementById('btn_home').className='method-btn';
         toggleMethod(); previewCost();
-      ">⚡ Outside (Fast)</button>
+      ">⚡ Outside (ChargeMOD)</button>
     </div>
- 
+
     <input type="hidden" id="inp_method" value="home">
- 
+
     <div class="kseb-note" id="kseb_note">
-      KSEB domestic slab tariff — 0–50: ₹3.25 | 51–100: ₹4.05 | 101–150: ₹5.10 | 151–200: ₹6.95 | 200+: ₹8.20
+      KSEB domestic slab tariff — 0–50 units: ₹3.25 | 51–100: ₹4.00 | 101–200: ₹5.25 | 200+: ₹6.85 per unit
     </div>
     <div class="kseb-note" id="out_note" style="display:none;background:rgba(249,115,22,0.07);border-color:rgba(249,115,22,0.2);color:#fdba74;">
-      ChargeMOD: ₹9.00/kWh service + 18% GST = <strong>₹10.62/kWh effective</strong>
+      ChargeMOD: ₹9.00/kWh service + 18% GST = <strong>₹10.62/kWh effective</strong><br>
+      Verified from invoice: 1.845 kWh → ₹16.60 service + ₹2.99 GST = ₹19.59 ✓
     </div>
- 
+
     <div class="form-row">
       <div class="form-group">
         <label>Date</label>
         <input type="date" id="inp_date">
       </div>
     </div>
- 
+
     <!-- HOME: % inputs -->
     <div class="form-row" id="row_pct">
       <div class="form-group">
@@ -1369,16 +1099,16 @@
         <input type="number" id="inp_end" min="0" max="100" placeholder="e.g. 80" oninput="previewCost()">
       </div>
     </div>
- 
+
     <!-- OUTSIDE: direct kWh input from ChargeMOD app/invoice -->
     <div class="form-row" id="row_kwh" style="display:none">
       <div class="form-group">
-        <label>kWh Used (from app or invoice)</label>
-        <input type="number" id="inp_kwh_direct" step="0.001" min="0" placeholder="e.g. 1.845" oninput="previewCost()" style="font-size:1.1rem; font-weight: 600;">
+        <label>kWh Used (from ChargeMOD app or invoice)</label>
+        <input type="number" id="inp_kwh_direct" step="0.001" min="0" placeholder="e.g. 1.845" oninput="previewCost()" style="font-size:1.1rem;padding:12px 14px;">
       </div>
     </div>
- 
-    <div class="form-row" id="row_times">
+
+    <div class="form-row">
       <div class="form-group">
         <label>Start Time</label>
         <input type="time" id="inp_time_start">
@@ -1387,24 +1117,21 @@
         <label>End Time</label>
         <input type="time" id="inp_time_end">
       </div>
-    </div>
-    
-    <div class="form-row">
       <div class="form-group">
-        <label>Location / Note (optional)</label>
+        <label>Note (optional)</label>
         <input type="text" id="inp_note" placeholder="e.g. Vismaya EVCS">
       </div>
     </div>
- 
+
     <div class="cost-preview" id="cost_preview"></div>
- 
-    <button class="save-btn" id="save_btn" onclick="saveSession()">Save Session</button>
+
+    <button class="save-btn" id="save_btn" onclick="saveSession()">Add Session</button>
   </div>
 </div>
- 
+
 <!-- ═══════════ ALL SESSIONS ═══════════ -->
 <div id="tab_sessions" class="tab-pane">
-  <div class="section-title">Charging History</div>
+  <div class="section-title">All Charging Sessions</div>
   <div class="table-wrap">
     <table>
       <thead>
@@ -1412,7 +1139,7 @@
           <th>Method</th>
           <th>Date</th>
           <th>Battery</th>
-          <th>Energy</th>
+          <th>kWh</th>
           <th>Tariff</th>
           <th>Time</th>
           <th>Cost</th>
@@ -1425,76 +1152,16 @@
     </table>
   </div>
 </div>
- 
+
 <!-- ═══════════ REPORTS ═══════════ -->
 <div id="tab_reports" class="tab-pane">
-  
-  <div class="report-filters">
-    <div class="form-group">
-      <label>Week Of (Any day)</label>
-      <input type="date" id="filter_week" onchange="renderReports()">
-    </div>
-    <div class="form-group">
-      <label>Select Month</label>
-      <input type="month" id="filter_month" onchange="renderReports()">
-    </div>
-    <div class="form-group">
-      <label>Select Year</label>
-      <input type="number" id="filter_year" min="2020" max="2099" onchange="renderReports()">
-    </div>
-  </div>
-
   <div class="report-section" id="report_weekly"></div>
   <div class="report-section" id="report_monthly"></div>
   <div class="report-section" id="report_yearly"></div>
 </div>
- 
+
 <!-- ═══════════ SETTINGS ═══════════ -->
 <div id="tab_settings" class="tab-pane">
-  
-  <div class="settings-card" style="border-color: var(--accent);">
-    <div class="settings-title" style="display:flex; justify-content:space-between; align-items:center;">
-      <span>📲 Install as App</span>
-    </div>
-    <div style="font-size:0.75rem; color:var(--muted); margin-bottom:16px; line-height:1.6;">
-      Install this tracker on your device's home screen for quick access. It behaves exactly like a native mobile app.
-    </div>
-    <button id="install_app_btn" class="settings-save-btn" onclick="installPWA()" style="width: 100%; display: none; background: var(--accent); color: #0a0f1e;">
-      Install App Now
-    </button>
-    <div style="margin-top:16px; font-size:0.7rem; color:var(--muted); border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
-      <em>Hosting elsewhere?</em> The app dynamically generates its manifest, but you can download the physical PWA config files below to include in your hosting folder.
-      <button class="settings-save-btn" onclick="exportPWA()" style="width: 100%; margin-top: 10px;">Export sw.js & manifest.json</button>
-    </div>
-  </div>
-
-  <div class="settings-card">
-    <div class="settings-title">⏱️ Home Charging Speed Calibration</div>
-    <div style="font-size:0.75rem; color:var(--muted); margin-bottom:16px; line-height:1.6;">
-      Set a reference to auto-calculate charging time based on percentage added.<br>
-      E.g. If 47% to 100% takes 3h 7m, set it here.
-    </div>
-    <div class="settings-row" style="gap:12px;">
-      <div class="form-group">
-        <label>Start %</label>
-        <input type="number" id="calib_start" value="47">
-      </div>
-      <div class="form-group">
-        <label>End %</label>
-        <input type="number" id="calib_end" value="100">
-      </div>
-      <div class="form-group">
-        <label>Hours</label>
-        <input type="number" id="calib_h" value="3">
-      </div>
-      <div class="form-group">
-        <label>Mins</label>
-        <input type="number" id="calib_m" value="7">
-      </div>
-    </div>
-    <button class="settings-save-btn" onclick="saveCalibration()" style="width: 100%; margin-top: 16px;">Save Calibration</button>
-  </div>
- 
   <div class="settings-card">
     <div class="settings-title">🔋 Battery Configuration</div>
     <div class="settings-row">
@@ -1502,46 +1169,75 @@
         <label>Battery Capacity (kWh)</label>
         <input type="number" id="battery_cap" step="0.01" min="1" placeholder="e.g. 3.97">
       </div>
+      <button class="settings-save-btn" onclick="saveBattery()">Save</button>
     </div>
-    <button class="settings-save-btn" onclick="saveBattery()" style="width: 100%;">Save Battery Config</button>
-    <div style="margin-top:16px;font-size:0.75rem;color:var(--muted);line-height:1.6">
-      Your EV's usable battery capacity in kWh. Used to convert % charged → kWh.<br><br>
-      💡 <strong style="color:var(--accent)">Tip:</strong> For outside sessions, use the <strong>manual kWh field</strong> from your ChargeMOD invoice — it's more accurate than % calculation.
+    <div style="margin-top:12px;font-size:0.7rem;color:var(--muted);line-height:1.6">
+      Your EV's usable battery capacity in kWh. Used to convert % charged → kWh.<br>
+      💡 <strong style="color:var(--accent)">Tip:</strong> For outside sessions, use the <strong>manual kWh field</strong> from your ChargeMOD invoice — it's more accurate than % calculation.<br>
+      From your invoice: 1.845 kWh used in 3H 7M session. Set capacity to match your vehicle.
     </div>
   </div>
- 
+
   <div class="settings-card">
-    <div class="settings-title">🏠 KSEB Tariff Slabs (Kerala)</div>
+    <div class="settings-title">🏠 KSEB Tariff Slabs (Kerala Domestic)</div>
     <table class="kseb-table">
       <thead><tr><th>Units (kWh)</th><th>Rate</th></tr></thead>
       <tbody>
         <tr><td>0 – 50</td><td>₹3.25 / unit</td></tr>
-        <tr><td>51 – 100</td><td>₹4.05 / unit</td></tr>
-        <tr><td>101 – 150</td><td>₹5.10 / unit</td></tr>
-        <tr><td>151 – 200</td><td>₹6.95 / unit</td></tr>
-        <tr><td>200+</td><td>₹8.20 / unit</td></tr>
+        <tr><td>51 – 100</td><td>₹4.00 / unit</td></tr>
+        <tr><td>101 – 200</td><td>₹5.25 / unit</td></tr>
+        <tr><td>200+</td><td>₹6.85 / unit</td></tr>
       </tbody>
     </table>
   </div>
- 
+
   <div class="settings-card">
-    <div class="settings-title">⚡ ChargeMOD Tariff</div>
+    <div class="settings-title">⚡ ChargeMOD Tariff (Vismaya EVCS / Infopark)</div>
     <table class="kseb-table">
       <thead><tr><th>Component</th><th>Rate</th></tr></thead>
       <tbody>
-        <tr><td>Energy (NS)</td><td>₹0.00 / kWh</td></tr>
+        <tr><td>Energy (NS / Non-Solar)</td><td>₹0.00 / kWh</td></tr>
         <tr><td>Service Charge</td><td>₹9.00 / kWh</td></tr>
         <tr><td>GST (18%)</td><td>On service charge</td></tr>
         <tr><td>Effective Rate</td><td>₹10.62 / kWh</td></tr>
+        <tr><td>Solar hours</td><td>9:00 – 16:00 IST</td></tr>
+        <tr><td>Non-Solar hours</td><td>16:00 – 9:00 IST</td></tr>
       </tbody>
     </table>
-    <div style="margin-top:12px;font-size:0.7rem;color:var(--muted)">
-      Reference: Vismaya EVCS / Infopark
+    <div style="margin-top:10px;font-size:0.65rem;color:var(--muted)">
+      Reference: Invoice #1775100500331__5851123 · 02-04-2026
     </div>
   </div>
 </div>
- 
+
+</div><!-- /tabs-slider -->
+</div><!-- /tabs-viewport -->
+
+<!-- ═══════════ BOTTOM NAV (mobile) ═══════════ -->
+<nav class="bottom-nav" id="bottom_nav">
+  <button class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">
+    <span class="nav-icon">📊</span>
+    <span class="nav-label">Dashboard</span>
+  </button>
+  <button class="nav-item" data-tab="add" onclick="switchTab('add')">
+    <span class="nav-icon">⚡</span>
+    <span class="nav-label">Add</span>
+  </button>
+  <button class="nav-item" data-tab="sessions" onclick="switchTab('sessions')">
+    <span class="nav-icon">📋</span>
+    <span class="nav-label">Logs</span>
+  </button>
+  <button class="nav-item" data-tab="reports" onclick="switchTab('reports')">
+    <span class="nav-icon">📈</span>
+    <span class="nav-label">Reports</span>
+  </button>
+  <button class="nav-item" data-tab="settings" onclick="switchTab('settings')">
+    <span class="nav-icon">⚙️</span>
+    <span class="nav-label">Settings</span>
+  </button>
+</nav>
+
 <div id="toast" class="toast"></div>
- 
+
 </body>
 </html>
