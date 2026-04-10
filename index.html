@@ -263,6 +263,9 @@
     const homeData = months.map(m => monthMap[m].home || 0);
     const outData  = months.map(m => monthMap[m].outside || 0);
 
+    // Sync canvas resolution to display size
+    canvas.width = canvas.offsetWidth || 600;
+    canvas.height = canvas.offsetHeight || 200;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!months.length) {
       ctx.fillStyle = '#aaa';
@@ -350,25 +353,28 @@
     const idx = TAB_ORDER.indexOf(tab);
     if (idx === -1) return;
 
-    // Top tabs (desktop)
+    // Highlight top tabs (desktop)
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     const topBtn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
     if (topBtn) topBtn.classList.add('active');
 
-    // Bottom nav (mobile)
+    // Highlight bottom nav (mobile)
     document.querySelectorAll('.bottom-nav .nav-item').forEach(b => b.classList.remove('active'));
     const botBtn = document.querySelector(`.bottom-nav .nav-item[data-tab="${tab}"]`);
     if (botBtn) botBtn.classList.add('active');
 
-    // Pane active class (for desktop display:none/block)
+    // Active class — used by desktop CSS (opacity 0/1) and for reference
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
     document.getElementById('tab_' + tab).classList.add('active');
 
-    // Slide the slider (mobile)
+    // Slide (all screen sizes — desktop CSS overrides transform to none)
     const slider = document.getElementById('tabs_slider');
-    if (slider) slider.style.transform = `translateX(-${idx * 100}vw)`;
+    if (slider) slider.style.transform = `translateX(calc(-${idx} * 100vw))`;
 
     window._currentTabIdx = idx;
+
+    // Scroll to top of new pane
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // ─── Swipe gesture ─────────────────────────────────────────────────────────
@@ -879,13 +885,20 @@
 
   @media (max-width: 600px) {
     .form-row { flex-direction: column; }
-    .header { flex-direction: column; align-items: flex-start; }
-    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .header { flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; }
+    .header-sub { display: none; }
+    .user-pill { font-size: 0.7rem; padding: 4px 12px; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .stat-card { padding: 14px; }
+    .stat-val { font-size: 1.15rem; }
     .report-grid { grid-template-columns: 1fr; }
-    /* Hide top tabs on mobile — use bottom nav instead */
+    .form-card { padding: 18px; border-radius: 12px; }
+    .chart-wrap { padding: 16px; }
+    canvas { height: 180px !important; }
+    .table-wrap { font-size: 0.72rem; }
+    tbody td, thead th { padding: 8px 10px; }
+    /* Hide top tabs on mobile */
     .tabs { display: none; }
-    /* Extra bottom padding so content clears the footer nav */
-    .tab-pane { padding-bottom: 100px; }
   }
 
   /* ─── Mobile Bottom Nav ───────────────────────── */
@@ -947,35 +960,48 @@
   }
 
   /* ─── Swipe / slide transition ────────────────── */
-  /* Desktop: slider is invisible wrapper, normal display:none/block applies */
-  .tabs-viewport { }
-  .tabs-slider { }
-
-  /* Mobile: full-width sliding panes */
-  @media (max-width: 600px) {
-    .tabs-viewport {
-      overflow: hidden;
-      position: relative;
-      width: 100%;
-    }
-    .tabs-slider {
-      display: flex;
-      transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
-      will-change: transform;
-      width: 100%;
-    }
+  /* Both desktop and mobile share this — JS controls what's visible */
+  .tabs-viewport {
+    overflow: hidden;
+    position: relative;
+    width: 100%;
+  }
+  .tabs-slider {
+    display: flex;
+    transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+    align-items: flex-start;
+  }
+  /* Each pane always rendered — JS slides to the right one */
+  .tab-pane {
+    display: block !important;
+    flex-shrink: 0;
+    width: 100vw;
+    max-width: 100vw;
+    box-sizing: border-box;
+    padding-bottom: 90px;
+  }
+  /* Desktop: constrain viewport width so overflow is hidden properly */
+  @media (min-width: 601px) {
+    .tabs-viewport { overflow: visible; }
+    .tabs-slider { overflow: visible; }
+    /* Hide all panes on desktop except active — use opacity trick so layout isn't broken */
     .tab-pane {
-      display: block !important;
-      min-width: 100vw;
-      flex-shrink: 0;
-    }
-    .tab-pane:not(.active) {
-      visibility: hidden;
+      width: 100% !important;
+      max-width: 100% !important;
+      position: absolute;
+      opacity: 0;
       pointer-events: none;
+      transform: none !important;
     }
     .tab-pane.active {
-      visibility: visible;
+      position: relative;
+      opacity: 1;
       pointer-events: auto;
+    }
+    .tabs-slider {
+      position: relative;
+      transform: none !important;
     }
   }
 </style>
@@ -1047,7 +1073,7 @@
       <span class="legend-item"><span class="legend-dot" style="background:var(--home)"></span>Home</span>
       <span class="legend-item"><span class="legend-dot" style="background:var(--out)"></span>Outside</span>
     </div>
-    <canvas id="monthly_chart" width="900" height="220"></canvas>
+    <canvas id="monthly_chart" height="200" style="width:100%;height:200px;display:block;"></canvas>
   </div>
 </div>
 
